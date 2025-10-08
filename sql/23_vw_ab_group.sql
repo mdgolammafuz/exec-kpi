@@ -1,4 +1,4 @@
--- Purpose: deterministic A/B assignment by user
+-- Purpose: deterministic A/B assignment per user (stable 50/50)
 -- Creates: exec-kpi.execkpi.vw_ab_group
 CREATE OR REPLACE VIEW `exec-kpi.execkpi.vw_ab_group` AS
 SELECT
