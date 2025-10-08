@@ -1,0 +1,10 @@
+name: "execkpi_dbt"
+version: "1.0.0"
+profile: "execkpi_profile"
+
+model-paths: ["models"]
+
+models:
+  execkpi_dbt:
+    +materialized: view
+    +schema: execkpi   # BigQuery dataset name

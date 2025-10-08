@@ -1,6 +1,15 @@
+# Python
 .venv/
-__pycache__/
-.DS_Store
+venv/
+
+# dbt artifacts
+dbt_project/target/
+dbt_project/logs/
+
+# Local dbt profiles (only if you ever put them in the repo)
+.dbt/
+
+# Credentials / misc
+*.json
+*.boto
 .env
-data/
-docs/*.png
