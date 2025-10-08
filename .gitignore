@@ -1,15 +1,39 @@
-# Python
+# Python/venv
 .venv/
 venv/
+__pycache__/
+*.pyc
+env/
 
 # dbt artifacts
 dbt_project/target/
 dbt_project/logs/
 
-# Local dbt profiles (only if you ever put them in the repo)
+# Local dbt profiles (only if we ever put them in the repo)
 .dbt/
 
 # Credentials / misc
 *.json
 *.boto
 .env
+
+# Airflow local state (do NOT commit)
+airflow/airflow.db
+airflow/airflow.cfg
+airflow/logs/
+airflow/*.pid
+airflow/*.log
+airflow/*webserver*.log
+airflow/*scheduler*.log
+airflow/*webserver*.out
+airflow/*scheduler*.out
+airflow/*webserver*.err
+airflow/*scheduler*.err
+airflow/standalone_admin_password.txt
+airflow/webserver_config.py
+
+
+# OS/Editor
+.DS_Store
+.idea/
+.vscode/
