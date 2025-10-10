@@ -1,20 +1,21 @@
 version: 2
 
 models:
-  - name: vw_revenue_daily
+  - name: revenue_daily
     description: Daily orders/revenue/AOV (completed orders)
     columns:
       - name: day
-        tests: [not_null]
+        tests:
+          - not_null
 
-  - name: vw_funnel_users
+  - name: funnel_users
     description: Per-user funnel flags; conversion comes from completed orders
     columns:
       - name: user_id
-        tests: [not_null]
+        tests:
+          - not_null
       - name: converted
         tests:
           - accepted_values:
-              arguments:
-                values: [true, false]  # <<< booleans
-                quote: false           # <<< don't quote them as strings
+              values: [true, false]
+              quote: false
