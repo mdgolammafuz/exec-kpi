@@ -113,3 +113,4 @@ urllib3==2.5.0
 websockets==15.0.1
 zipp==3.23.0
 matplotlib>=3.8,<3.11
+scipy>=1.10
