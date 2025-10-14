@@ -1,5 +1,7 @@
 import os
+import time
 from datetime import date, timedelta
+
 import pandas as pd
 import numpy as np
 import streamlit as st
@@ -13,9 +15,16 @@ DATASET = os.getenv("BQ_DATASET", "execkpi_execkpi")  # matches dbt output datas
 
 client = bigquery.Client(project=PROJECT)
 
-def bq_df(sql, params=None):
+# ---- minimal observability store ----
+_DIAG = []  # each entry: {"label": str, "rows": int, "ms": int}
+
+def bq_df(sql, params=None, label="query"):
+    start = time.perf_counter()
     job_config = bigquery.QueryJobConfig(query_parameters=params or [])
-    return client.query(sql, job_config=job_config).result().to_dataframe()
+    df = client.query(sql, job_config=job_config).result().to_dataframe()
+    ms = int((time.perf_counter() - start) * 1000)
+    _DIAG.append({"label": label, "rows": len(df), "ms": ms})
+    return df
 
 # ---- SIDEBAR FILTERS ----
 st.sidebar.header("Filters")
@@ -23,6 +32,8 @@ end = st.sidebar.date_input("End date", value=date.today())
 start = st.sidebar.date_input("Start date", value=end - timedelta(days=30))
 if start > end:
     st.sidebar.error("Start date must be before end date")
+
+show_diag = st.sidebar.checkbox("Show diagnostics", value=False)
 
 # ---- REVENUE ----
 st.title("Executive KPIs")
@@ -39,6 +50,7 @@ rev = bq_df(
         bigquery.ScalarQueryParameter("start", "DATE", str(start)),
         bigquery.ScalarQueryParameter("end",   "DATE", str(end)),
     ],
+    label="revenue_current_window",
 )
 
 col1, col2 = st.columns([2, 3])
@@ -65,6 +77,7 @@ with col2:
             bigquery.ScalarQueryParameter("s", "DATE", str(prev_start)),
             bigquery.ScalarQueryParameter("e", "DATE", str(prev_end)),
         ],
+        label="revenue_prev_window",
     )
     prev_rev = float(prev_rev_df["revenue"].iloc[0] or 0)
     cur_rev = float(rev["revenue"].sum() if not rev.empty else 0)
@@ -79,7 +92,10 @@ with col2:
 # ---- A/B METRICS ----
 st.markdown("---")
 st.subheader("A/B Conversion")
-ab = bq_df(f"SELECT ab_group, users, converters, conversion_rate FROM `{PROJECT}.{DATASET}.ab_metrics`")
+ab = bq_df(
+    f"SELECT ab_group, users, converters, conversion_rate FROM `{PROJECT}.{DATASET}.ab_metrics`",
+    label="ab_metrics",
+)
 if not ab.empty:
     st.dataframe(ab, width="stretch")
 
@@ -98,14 +114,14 @@ if not ab.empty:
 
         # SRM (allocation sanity check)
         total = n_c + n_t
-        exp = total / 2
-        chi2_stat = ((n_c - exp) ** 2) / exp + ((n_t - exp) ** 2) / exp if exp else float("nan")
+        exp = total / 2 if total else float("nan")
+        chi2_stat = ((n_c - exp) ** 2) / exp + ((n_t - exp) ** 2) / exp if np.isfinite(exp) else float("nan")
         srm_p = 1 - chi2.cdf(chi2_stat, df=1) if np.isfinite(chi2_stat) else float("nan")
 
         # 2-proportion z-test
         denom = (n_c + n_t)
         p_pool = (x_c + x_t) / denom if denom else float("nan")
-        se = np.sqrt(p_pool * (1 - p_pool) * (1/n_c + 1/n_t)) if p_pool > 0 and p_pool < 1 else float("nan")
+        se = np.sqrt(p_pool * (1 - p_pool) * (1/n_c + 1/n_t)) if 0 < p_pool < 1 else float("nan")
         z = uplift / se if np.isfinite(se) and se > 0 else float("nan")
         p_val = 2 * (1 - norm.cdf(abs(z))) if np.isfinite(z) else float("nan")
         ci_low = uplift - 1.96 * se if np.isfinite(se) else float("nan")
@@ -124,11 +140,14 @@ else:
 st.markdown("---")
 st.subheader("Weekly Retention (Cohort × Week)")
 try:
-    ret = bq_df(f"""
-    SELECT cohort_week, week_n, retention_rate
-    FROM `{PROJECT}.{DATASET}.retention_weekly`
-    ORDER BY cohort_week, week_n
-    """)
+    ret = bq_df(
+        f"""
+        SELECT cohort_week, week_n, retention_rate
+        FROM `{PROJECT}.{DATASET}.retention_weekly`
+        ORDER BY cohort_week, week_n
+        """,
+        label="retention_weekly",
+    )
     if not ret.empty:
         ret_pivot = ret.pivot(index="cohort_week", columns="week_n", values="retention_rate").fillna(0)
         # Use gradient if matplotlib is present; otherwise plain table
@@ -146,5 +165,16 @@ try:
         st.info("No retention data.")
 except Exception as e:
     st.error(f"Retention query failed: {e}")
+
+# ---- DIAGNOSTICS PANEL (toggle from sidebar) ----
+if show_diag:
+    st.markdown("---")
+    st.subheader("Diagnostics")
+    if _DIAG:
+        diag_df = pd.DataFrame(_DIAG)[["label", "rows", "ms"]].sort_values("ms", ascending=False)
+        st.write(f"Project: `{PROJECT}`  •  Dataset: `{DATASET}`")
+        st.dataframe(diag_df, width="stretch")
+    else:
+        st.write("No queries executed yet.")
 
 st.caption("Data source: BigQuery views built by dbt (ab_group, funnel_users, revenue_daily, retention_weekly, ab_metrics).")
