@@ -2,20 +2,93 @@ version: 2
 
 models:
   - name: revenue_daily
-    description: Daily orders/revenue/AOV (completed orders)
+    description: "Daily orders/revenue/AOV from TheLook completed orders."
     columns:
       - name: day
+        description: "Calendar day of the metric."
         tests:
           - not_null
+      - name: orders
+        description: "Number of completed orders for the day."
+      - name: revenue
+        description: "Total revenue from completed orders for the day."
+      - name: aov
+        description: "Average order value."
 
   - name: funnel_users
-    description: Per-user funnel flags; conversion comes from completed orders
+    description: "Per-user funnel flags derived from events and completed orders."
     columns:
       - name: user_id
         tests:
           - not_null
+      - name: visited
+        description: "User has at least one page_view."
+      - name: added_to_cart
+        description: "User has at least one add_to_cart."
       - name: converted
+        description: "User has at least one completed order."
         tests:
           - accepted_values:
-              values: [true, false]
+              arguments:
+                values: [true, false]
+              quote: false
+
+  - name: ab_group
+    description: "Deterministic 50/50 A/B assignment per user using FARM_FINGERPRINT."
+    columns:
+      - name: user_id
+        tests:
+          - not_null
+      - name: ab_group
+        tests:
+          - not_null
+
+  - name: ab_metrics
+    description: "Aggregated A/B metrics per group (users, converters, conversion_rate)."
+    columns:
+      - name: ab_group
+        tests:
+          - not_null
+      - name: users
+        description: "Total users in this A/B group."
+        tests:
+          - not_null
+      - name: converters
+        description: "Users who converted in this group."
+      - name: conversion_rate
+        description: "Converters / users."
+
+  - name: retention_weekly
+    description: "Cohort-based weekly retention: cohort_week × week_n."
+    columns:
+      - name: cohort_week
+        tests:
+          - not_null
+      - name: week_n
+        tests:
+          - not_null
+      - name: retention_rate
+        description: "Active users in week / total users in cohort."
+
+  - name: features_conversion
+    description: "RFM + source-mix features plus 14-day conversion label, built from TheLook."
+    columns:
+      - name: user_id
+        tests:
+          - not_null
+      - name: days_since_signup
+      - name: orders_30d
+      - name: revenue_30d
+      - name: frequency_30d
+      - name: pct_email
+      - name: pct_direct
+      - name: pct_organic
+      - name: pct_ads
+      - name: pct_social
+      - name: will_convert_14d
+        description: "Binary label: 1 if user converts within 14 days after anchor event."
+        tests:
+          - accepted_values:
+              arguments:
+                values: [0, 1]
               quote: false
