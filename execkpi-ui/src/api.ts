@@ -1,9 +1,8 @@
 // src/api.ts
 import axios from "axios";
 
-const api = axios.create({
-  baseURL: import.meta.env.VITE_API_URL ?? "http://127.0.0.1:8001",
-});
+const API_BASE =
+  import.meta.env.VITE_API_BASE || "http://127.0.0.1:8001";
 
 export type KPIResponse = {
   rows: number;
@@ -11,22 +10,13 @@ export type KPIResponse = {
   data: Record<string, unknown>[];
 };
 
-export type SQLParam = {
-  name: string;
-  type: string;
-  value: string | number;
-};
-
 export type ABSampleResponse = {
-  sample: Record<string, { success: number; total: number }>;
-};
-
-export type ABTestPayload = {
-  a_success: number;
-  a_total: number;
-  b_success: number;
-  b_total: number;
-  alpha: number;
+  sample: {
+    [key: string]: {
+      success: number;
+      total: number;
+    };
+  };
 };
 
 export type ABTestResult = {
@@ -35,20 +25,39 @@ export type ABTestResult = {
   significant: boolean;
 };
 
-export const runSQL = (sql_file: string, params?: SQLParam[]) =>
-  api
-    .post<KPIResponse>("/kpi/query", { sql_file, params })
-    .then((res) => res.data);
+export async function runSQL(
+  sqlFile: string,
+  params: Array<{ name: string; type: string; value: string }>
+): Promise<KPIResponse> {
+  const res = await axios.post(`${API_BASE}/kpi/query`, {
+    sql_file: sqlFile,
+    params,
+  });
+  return res.data as KPIResponse;
+}
 
-export const getABSample = () =>
-  api.get<ABSampleResponse>("/ab/sample").then((res) => res.data);
+export async function getABSample(): Promise<ABSampleResponse> {
+  const res = await axios.get(`${API_BASE}/ab/sample`);
+  return res.data as ABSampleResponse;
+}
 
-export const runABTest = (payload: ABTestPayload) =>
-  api.post<ABTestResult>("/ab/test", payload).then((res) => res.data);
+export async function runABTest(payload: {
+  a_success: number;
+  a_total: number;
+  b_success: number;
+  b_total: number;
+  alpha: number;
+}): Promise<ABTestResult> {
+  const res = await axios.post(`${API_BASE}/ab/test`, payload);
+  return res.data as ABTestResult;
+}
 
-// ML are placeholders for now
-export const trainML = (target: string) =>
-  api.post("/ml/train", { target }).then((res) => res.data);
+export async function trainML(): Promise<unknown> {
+  const res = await axios.post(`${API_BASE}/ml/train`);
+  return res.data;
+}
 
-export const latestML = () =>
-  api.get("/ml/latest").then((res) => res.data);
+export async function latestML(): Promise<unknown> {
+  const res = await axios.get(`${API_BASE}/ml/latest`);
+  return res.data;
+}

@@ -1,4 +1,4 @@
--- UI/API-friendly view of ML features
+-- API-friendly: features_conversion
 SELECT
   user_id,
   days_since_signup,
@@ -11,6 +11,5 @@ SELECT
   pct_ads,
   pct_social,
   will_convert_14d
-FROM `exec-kpi.execkpi.features_conversion`
-ORDER BY user_id
-LIMIT 500;
+FROM `exec-kpi.execkpi_execkpi.features_conversion`
+LIMIT 5000;

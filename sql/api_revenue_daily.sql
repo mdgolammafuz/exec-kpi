@@ -1,9 +1,10 @@
--- Readable daily KPI for the UI/API
+-- API-friendly: revenue_daily
 SELECT
   day,
-  revenue,
   orders,
+  revenue,
   aov
-FROM `exec-kpi.execkpi.revenue_daily`
-WHERE day BETWEEN @start AND @end
+FROM `exec-kpi.execkpi_execkpi.revenue_daily`
+WHERE (@start IS NULL OR day >= @start)
+  AND (@end   IS NULL OR day <= @end)
 ORDER BY day;
