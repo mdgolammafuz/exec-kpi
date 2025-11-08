@@ -1,4 +1,3 @@
-# backend/main.py
 import os
 from typing import Any, List, Optional
 
@@ -6,12 +5,15 @@ from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from google.cloud import bigquery
+import json
+from pathlib import Path
 
 PROJECT_ID = os.getenv("GOOGLE_CLOUD_PROJECT", os.getenv("GCP_PROJECT", "exec-kpi"))
-BQ_DATASET = os.getenv("EXECKPI_BQ_DATASET", os.getenv("BQ_DATASET", "execkpi_execkpi"))
+BQ_DATASET = os.getenv("EXECKPI_BQ_DATASET", os.getenv("BQ_DATASET", "execkpi"))
 SQL_DIR = os.getenv("EXECKPI_SQL_DIR", "sql")
+ARTIFACT_DIR = Path(os.getenv("EXECKPI_ARTIFACT_DIR", "artifacts"))
 
-app = FastAPI(title="ExecKPI Backend", version="0.3")
+app = FastAPI(title="ExecKPI Backend", version="0.4")
 
 app.add_middleware(
     CORSMiddleware,
@@ -82,11 +84,9 @@ def kpi_query(req: SQLRequest):
 
 @app.get("/ab/sample")
 def ab_sample():
-    # try to read from ab_metrics in your dataset
     try:
         df = _bq_client().query(
-            f"SELECT ab_group as variant, converters as success, users as total "
-            f"FROM `{PROJECT_ID}.{BQ_DATASET}.ab_metrics`"
+            f"SELECT ab_group as variant, users as success, users as total FROM `{PROJECT_ID}.{BQ_DATASET}.ab_metrics`"
         ).result().to_dataframe()
         if not df.empty:
             grouped = (
@@ -98,7 +98,6 @@ def ab_sample():
     except Exception:
         pass
 
-    # fallback
     return {
         "sample": {
             "A": {"success": 120, "total": 1000},
@@ -127,11 +126,37 @@ def ab_test(req: ABTestRequest):
 
 
 @app.post("/ml/train")
-def ml_train_placeholder():
-    # we will fill this after confirming Gold features table
-    raise HTTPException(status_code=501, detail="ML not enabled yet.")
+def ml_train():
+    """
+    Call the trainer script logic (we could import and call).
+    For now we shell out to keep it simple inside the repo.
+    """
+    # simplest: run python script from here
+    exit_code = os.system("python backend/train_explain.py")
+    if exit_code != 0:
+        raise HTTPException(status_code=500, detail="ML training failed")
+
+    # after training, return latest
+    return ml_latest()
 
 
 @app.get("/ml/latest")
-def ml_latest_placeholder():
-    return {"detail": "ML not enabled yet."}
+def ml_latest():
+    """
+    Return latest metrics/artifacts from artifacts/
+    """
+    metrics_path = ARTIFACT_DIR / "metrics.json"
+    if not metrics_path.exists():
+        raise HTTPException(status_code=404, detail="No ML artifacts found")
+
+    with open(metrics_path, "r", encoding="utf-8") as f:
+        metrics = json.load(f)
+
+    return {
+        "metrics": metrics,
+        "artifacts": {
+            "model": str(ARTIFACT_DIR / "model.xgb"),
+            "columns": str(ARTIFACT_DIR / "columns.json"),
+            "shap_values": str(ARTIFACT_DIR / "shap_values.npy"),
+        },
+    }
