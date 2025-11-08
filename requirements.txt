@@ -114,3 +114,5 @@ websockets==15.0.1
 zipp==3.23.0
 matplotlib>=3.8,<3.11
 scipy>=1.10
+fastapi==0.115.2
+uvicorn[standard]==0.30.6
