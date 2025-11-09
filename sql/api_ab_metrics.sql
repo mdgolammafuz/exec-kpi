@@ -4,5 +4,5 @@ SELECT
   users,
   converters,
   conversion_rate
-FROM `exec-kpi.execkpi_execkpi.ab_metrics`
+FROM `execkpi_execkpi.ab_metrics`
 ORDER BY ab_group;

@@ -11,5 +11,5 @@ SELECT
   pct_ads,
   pct_social,
   will_convert_14d
-FROM `exec-kpi.execkpi_execkpi.features_conversion`
+FROM `execkpi_execkpi.features_conversion`
 LIMIT 5000;

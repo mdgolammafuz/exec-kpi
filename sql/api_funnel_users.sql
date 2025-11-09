@@ -4,5 +4,5 @@ SELECT
   visited,
   added_to_cart,
   converted
-FROM `exec-kpi.execkpi_execkpi.funnel_users`
+FROM `execkpi_execkpi.funnel_users`
 LIMIT 5000;
