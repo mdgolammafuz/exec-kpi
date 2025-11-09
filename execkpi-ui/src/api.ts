@@ -1,8 +1,7 @@
 // src/api.ts
 import axios from "axios";
 
-const API_BASE =
-  import.meta.env.VITE_API_BASE || "http://127.0.0.1:8001";
+const API_BASE = import.meta.env.VITE_API_BASE || "http://127.0.0.1:8001";
 
 export type KPIResponse = {
   rows: number;
@@ -21,8 +20,23 @@ export type ABSampleResponse = {
 
 export type ABTestResult = {
   p_value: number;
-  chi2: number;
+  ci_95?: [number, number];
+  uplift?: number;
+  srm_p?: number;
   significant: boolean;
+  group?: {
+    A: { success: number; total: number; rate: number };
+    B: { success: number; total: number; rate: number };
+  };
+};
+
+// SHAP summary coming from backend /ml/shap
+export type ShapSummary = {
+  feature_names: string[];
+  importances: Array<{
+    feature: string;
+    mean_abs_shap: number;
+  }>;
 };
 
 export async function runSQL(
@@ -60,4 +74,10 @@ export async function trainML(): Promise<unknown> {
 export async function latestML(): Promise<unknown> {
   const res = await axios.get(`${API_BASE}/ml/latest`);
   return res.data;
+}
+
+// NEW: fetch SHAP summary (if present)
+export async function getShap(): Promise<ShapSummary> {
+  const res = await axios.get(`${API_BASE}/ml/shap`);
+  return res.data as ShapSummary;
 }

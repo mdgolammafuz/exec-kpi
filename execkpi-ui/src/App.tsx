@@ -6,11 +6,13 @@ import
     runABTest,
     trainML,
     latestML,
+    getShap,
   } from "./api";
 import type {
   KPIResponse,
   ABSampleResponse,
   ABTestResult,
+  ShapSummary,
 } from "./api";
 
 type Tab = "kpi" | "ab" | "ml";
@@ -135,10 +137,10 @@ function KPIPanel ( {
 } )
 {
   const [ start, setStart ] = useState<string>( () =>
-    new Date( Date.now() - 30 * 86400000 ).toISOString().slice( 0, 10 )
+    new Date( Date.now() - 30 * 86400000 ).toISOString().slice( 0, 10 ),
   );
   const [ end, setEnd ] = useState<string>( () =>
-    new Date().toISOString().slice( 0, 10 )
+    new Date().toISOString().slice( 0, 10 ),
   );
   const [ sqlFile, setSqlFile ] = useState<string>( "api_revenue_daily.sql" );
   const [ loading, setLoading ] = useState( false );
@@ -154,7 +156,7 @@ function KPIPanel ( {
     ] )
       .then( ( data ) => setOutput( data ) )
       .catch( ( err: unknown ) =>
-        setError( err instanceof Error ? err.message : "Request failed" )
+        setError( err instanceof Error ? err.message : "Request failed" ),
       )
       .finally( () => setLoading( false ) );
   };
@@ -238,7 +240,7 @@ function ABPanel ( {
     };
     void fetchSample();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [] ); // <- important: don't depend on setOutput, or it'll refetch every render
+  }, [] );
 
   const runTest = () =>
   {
@@ -339,6 +341,17 @@ function ABPanel ( {
   );
 }
 
+// small helper to avoid `any` for axios-like errors
+function isAxiosLike404 ( err: unknown ): boolean
+{
+  if ( typeof err !== "object" || err === null ) return false;
+  if ( !( "response" in err ) ) return false;
+  const resp = ( err as { response?: unknown } ).response;
+  if ( typeof resp !== "object" || resp === null ) return false;
+  const status = ( resp as { status?: unknown } ).status;
+  return typeof status === "number" && status === 404;
+}
+
 function MLPanel ( {
   setOutput,
   setError,
@@ -349,6 +362,7 @@ function MLPanel ( {
 {
   const [ training, setTraining ] = useState( false );
   const [ loadingLatest, setLoadingLatest ] = useState( false );
+  const [ loadingShap, setLoadingShap ] = useState( false );
   const [ panelError, setPanelError ] = useState<string | null>( null );
 
   const handleTrain = () =>
@@ -383,6 +397,30 @@ function MLPanel ( {
       .finally( () => setLoadingLatest( false ) );
   };
 
+  const handleShap = () =>
+  {
+    setLoadingShap( true );
+    setPanelError( null );
+    setError( null );
+    getShap()
+      .then( ( data: ShapSummary ) =>
+      {
+        // actually use it → goes to result panel
+        setOutput( data );
+      } )
+      .catch( ( err: unknown ) =>
+      {
+        const msg = isAxiosLike404( err )
+          ? "No SHAP summary yet. Train a model first."
+          : err instanceof Error
+            ? err.message
+            : "Request failed";
+        setPanelError( msg );
+        setError( msg );
+      } )
+      .finally( () => setLoadingShap( false ) );
+  };
+
   return (
     <div>
       <h2>ML</h2>
@@ -396,11 +434,19 @@ function MLPanel ( {
       >
         { loadingLatest ? "Loading latest…" : "Latest" }
       </button>
+      <button
+        onClick={ handleShap }
+        style={ { marginLeft: "0.5rem" } }
+        disabled={ loadingShap }
+      >
+        { loadingShap ? "Loading SHAP…" : "SHAP" }
+      </button>
       { panelError ? (
         <p style={ { color: "crimson" } }>{ panelError }</p>
       ) : (
         <p style={ { color: "#777" } }>
-          Uses artifacts/metrics.json from backend.
+          Uses artifacts/metrics.json and artifacts/shap_summary.json from
+          backend.
         </p>
       ) }
     </div>

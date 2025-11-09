@@ -19,7 +19,7 @@ app.add_middleware(
 )
 
 PROJECT = os.getenv("GCP_PROJECT", "exec-kpi")
-DATASET = os.getenv("BQ_DATASET", "execkpi_execkpi")  # <- matches your dbt
+DATASET = os.getenv("BQ_DATASET", "execkpi_execkpi")
 SQL_DIR = Path(__file__).resolve().parent.parent / "sql"
 
 
@@ -48,12 +48,6 @@ def _to_native(obj: Any) -> Any:
 
 @app.post("/kpi/query")
 def kpi_query(payload: dict):
-    """
-    payload = {
-      "sql_file": "api_revenue_daily.sql",
-      "params": [{"name":"start","type":"DATE","value":"2025-11-01"}, ...]
-    }
-    """
     sql_file = payload.get("sql_file")
     params: List[dict] = payload.get("params") or []
 
@@ -88,9 +82,6 @@ def kpi_query(payload: dict):
 
 @app.get("/ab/sample")
 def ab_sample():
-    """
-    Return a simple sample for A/B to let the UI render.
-    """
     sample = {
         "A": {"success": 120, "total": 1000},
         "B": {"success": 150, "total": 980},
@@ -100,15 +91,6 @@ def ab_sample():
 
 @app.post("/ab/test")
 def ab_test(payload: dict):
-    """
-    payload = {
-      "a_success": int,
-      "a_total": int,
-      "b_success": int,
-      "b_total": int,
-      "alpha": float
-    }
-    """
     from math import sqrt
     from scipy.stats import norm, chi2
 
@@ -128,13 +110,11 @@ def ab_test(payload: dict):
     p_b = b_s / b_n
     uplift = p_b - p_a
 
-    # SRM check
     total = a_n + b_n
     exp = total / 2
     chi2_stat = ((a_n - exp) ** 2) / exp + ((b_n - exp) ** 2) / exp
     srm_p = 1 - chi2.cdf(chi2_stat, df=1)
 
-    # 2-prop z-test
     pooled = (a_s + b_s) / total
     se = sqrt(pooled * (1 - pooled) * (1 / a_n + 1 / b_n))
     z = uplift / se
@@ -162,10 +142,6 @@ def ab_test(payload: dict):
 # ------------------------------------------------------------------------------
 
 def _extract_last_json(stdout: str) -> Optional[dict]:
-    """
-    Our trainer prints logs + a JSON block at the end.
-    We'll find the last '{' and try to json-load from there.
-    """
     idx = stdout.rfind("{")
     if idx == -1:
         return None
@@ -201,7 +177,6 @@ def ml_train():
     if parsed is not None:
         return _to_native(parsed)
 
-    # fallback: return stdout but prettified into lines
     return {
         "output": out.splitlines()
     }
@@ -213,4 +188,13 @@ def ml_latest():
     if not metrics_path.exists():
         raise HTTPException(status_code=404, detail="No ML artifacts yet")
     data = json.loads(metrics_path.read_text(encoding="utf-8"))
+    return _to_native(data)
+
+
+@app.get("/ml/shap")
+def ml_shap():
+    shap_path = Path("artifacts") / "shap_summary.json"
+    if not shap_path.exists():
+        raise HTTPException(status_code=404, detail="No SHAP summary yet")
+    data = json.loads(shap_path.read_text(encoding="utf-8"))
     return _to_native(data)

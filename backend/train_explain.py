@@ -1,21 +1,20 @@
 """
-ExecKPI trainer: compare 3 models on features_conversion and save best.
-
-Hard requirements:
-- BigQuery table must exist (we try several names).
-- xgboost must be importable (we fail if not).
+ExecKPI trainer: load BQ features, train 3 models, pick best, save artifacts,
+and compute SHAP feature importance (now that columns are coerced).
 """
 
 import json
 import os
 import pickle
 from pathlib import Path
-from typing import Optional
+from typing import Optional, Any
 
 import numpy as np
 import pandas as pd
-from google.cloud import bigquery
 from google.api_core.exceptions import NotFound
+from google.cloud import bigquery
+from sklearn.ensemble import RandomForestClassifier
+from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import accuracy_score, roc_auc_score
 from sklearn.model_selection import train_test_split
 
@@ -34,6 +33,9 @@ CANDIDATE_TABLES = [
 ]
 
 
+# ---------------------------------------------------------------------
+# BQ helpers
+# ---------------------------------------------------------------------
 def find_existing_features_table(client: bigquery.Client) -> str:
     print("[trainer] probing candidate feature tables in BigQuery...")
     for table_fq in CANDIDATE_TABLES:
@@ -50,44 +52,71 @@ def find_existing_features_table(client: bigquery.Client) -> str:
             print(f"[trainer]    error probing {table_fq}: {e}")
     raise RuntimeError(
         "Could not find features_conversion in any known dataset.\n"
-        "Try: dbt build (which writes to exec-kpi:execkpi_execkpi) "
-        "or set EXECKPI_FEATURE_TABLE to the exact table."
+        "Run: dbt build (writes to exec-kpi:execkpi_execkpi) or set EXECKPI_FEATURE_TABLE."
     )
+
+
+def _coerce_cell(v: Any) -> float:
+    """
+    BigQuery sometimes gives us weird stringy numbers like '[6.874376E-1]'.
+    This tries to make *everything* a float.
+    """
+    if v is None:
+        return 0.0
+    # list/array-like -> take first
+    if isinstance(v, (list, tuple)):
+        return _coerce_cell(v[0]) if v else 0.0
+    # plain number
+    if isinstance(v, (int, float, np.integer, np.floating)):
+        return float(v)
+    # stringy number, maybe wrapped in [] or with E
+    if isinstance(v, str):
+        s = v.strip()
+        if s.startswith("[") and s.endswith("]"):
+            s = s[1:-1].strip()
+        try:
+            return float(s)
+        except Exception:
+            return 0.0
+    # fallback
+    return 0.0
 
 
 def load_features() -> pd.DataFrame:
     client = bigquery.Client(project=PROJECT_ID)
     table_fq = find_existing_features_table(client)
+    print(f"[trainer] loading from {table_fq}...")
     df = client.query(f"SELECT * FROM `{table_fq}`").result().to_dataframe()
+    print(f"[trainer] loaded {len(df)} rows, {len(df.columns)} columns")
+
     if df.empty:
         raise RuntimeError(f"Feature table {table_fq} returned 0 rows")
-    # stash for metrics
+
+    # columns we won't treat as features
+    target_col = "will_convert_14d"
+    id_cols = {"user_id"}
+
+    feature_cols = [c for c in df.columns if c not in id_cols | {target_col}]
+    print(f"[trainer] cleaning {len(feature_cols)} feature columns...")
+
+    for col in feature_cols:
+        df[col] = df[col].map(_coerce_cell).astype(float)
+
+    # stash for metrics / response
     df._feature_table_fq = table_fq  # type: ignore[attr-defined]
     return df
 
 
+# ---------------------------------------------------------------------
+# Model candidates
+# ---------------------------------------------------------------------
 def get_model_candidates():
-    """Return list of (name, model_instance, supports_proba) with mandatory xgboost."""
-    from sklearn.linear_model import LogisticRegression
-    from sklearn.ensemble import RandomForestClassifier
-
-    # xgboost: mandatory now
-    try:
-        import xgboost as xgb  # noqa: F401
-    except Exception as e:
-        raise RuntimeError(
-            "xgboost is required but could not be imported.\n"
-            "macOS fix:\n"
-            "  brew install libomp\n"
-            "  python -m pip install --force-reinstall xgboost\n"
-            f"Original error: {e}"
-        )
-
+    # xgboost is present in your venv now
     import xgboost as xgb
 
     models = [
         ("logistic_regression", LogisticRegression(max_iter=1000), True),
-        ("random_forest",        RandomForestClassifier(n_estimators=200, random_state=42), True),
+        ("random_forest", RandomForestClassifier(n_estimators=200, random_state=42), True),
         (
             "xgboost",
             xgb.XGBClassifier(
@@ -120,31 +149,72 @@ def train_and_eval(model, X_train, X_test, y_train, y_test, supports_proba: bool
 
     auc = float(roc_auc_score(y_test, proba))
     acc = float(accuracy_score(y_test, (proba >= 0.5).astype(int)))
-    return auc, acc, proba
+    return auc, acc
 
 
-def maybe_compute_shap(best_name: str, best_model, X_train, artifact_dir: Path):
+# ---------------------------------------------------------------------
+# SHAP
+# ---------------------------------------------------------------------
+def maybe_compute_shap(best_name: str, best_model, X_train: pd.DataFrame, artifact_dir: Path):
+    """
+    Now that features are float64, shap.TreeExplainer should work.
+    We'll save a *ranked* list at artifacts/shap_importance.json
+    so the API can just serve it.
+    """
     try:
-        import shap  # noqa: F401
+      import shap  # type: ignore
     except Exception:
-        print("[trainer] shap not available, skipping shap values")
+      print("[trainer][shap] shap not installed, skipping.")
+      return
+
+    if best_name not in {"xgboost", "random_forest"}:
+        # still save nothing — it's fine
         return
 
-    # only for tree models
-    if best_name not in {"random_forest", "xgboost"}:
-        return
+    n = min(200, len(X_train))
+    sample = X_train.sample(n=n, random_state=42)
+    X_np = sample.to_numpy(dtype=float, copy=True)
+    print(f"[trainer][shap] computing feature importance...")
+    print(f"[trainer][shap] X_np shape: {X_np.shape}, dtype: {X_np.dtype}")
 
     try:
-        import shap
-
         explainer = shap.TreeExplainer(best_model)
-        shap_values = explainer.shap_values(X_train)
-        np.save(artifact_dir / "shap_values.npy", shap_values)
-        print("[trainer] shap values saved")
+        shap_vals = explainer.shap_values(X_np)
+
+        # xgboost sometimes returns list[class]
+        if isinstance(shap_vals, list):
+            shap_vals = shap_vals[0]
+
+        mean_abs = np.mean(np.abs(shap_vals), axis=0)
+        feature_names = list(sample.columns)
+
+        feats = [
+            {"feature": f, "mean_abs_shap": float(m)}
+            for f, m in zip(feature_names, mean_abs)
+        ]
+        feats.sort(key=lambda x: x["mean_abs_shap"], reverse=True)
+
+        artifact_dir.mkdir(parents=True, exist_ok=True)
+        out_path = artifact_dir / "shap_importance.json"
+        with open(out_path, "w", encoding="utf-8") as f:
+            json.dump(
+                {
+                    "source": "shap",
+                    "feature_names": feature_names,
+                    "importances": feats,
+                },
+                f,
+                indent=2,
+            )
+        print("[trainer][shap] saved to artifacts/shap_importance.json")
     except Exception as e:
-        print(f"[trainer] failed to compute shap: {e}")
+        # we *do* want to keep training success even if SHAP flops
+        print(f"[trainer][shap] failed: {e}")
 
 
+# ---------------------------------------------------------------------
+# Save artifacts
+# ---------------------------------------------------------------------
 def save_artifacts(best_name, best_model, columns, all_metrics, artifact_dir: Path):
     artifact_dir.mkdir(parents=True, exist_ok=True)
 
@@ -167,6 +237,9 @@ def save_artifacts(best_name, best_model, columns, all_metrics, artifact_dir: Pa
     }
 
 
+# ---------------------------------------------------------------------
+# main()
+# ---------------------------------------------------------------------
 def main():
     print("[trainer] loading features...")
     df = load_features()
@@ -178,8 +251,10 @@ def main():
     feature_table_fq = getattr(df, "_feature_table_fq", "UNKNOWN")
 
     X = df.drop(columns=[target_col, "user_id"], errors="ignore")
-    X = X.select_dtypes(include=[np.number]).fillna(0.0)
+    # at this point we already coerced to float in load_features()
     y = df[target_col].astype(int)
+
+    print(f"[trainer] X shape: {X.shape}, dtypes: {list(set(X.dtypes))}")
 
     X_train, X_test, y_train, y_test = train_test_split(
         X, y, test_size=0.2, random_state=42, stratify=y
@@ -194,7 +269,7 @@ def main():
 
     for name, model, supports_proba in candidates:
         print(f"[trainer] training {name} ...")
-        auc, acc, _ = train_and_eval(model, X_train, X_test, y_train, y_test, supports_proba)
+        auc, acc = train_and_eval(model, X_train, X_test, y_train, y_test, supports_proba)
         all_metrics[name] = {
             "auc": auc,
             "accuracy": acc,
