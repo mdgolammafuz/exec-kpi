@@ -29,7 +29,6 @@ FEATURE_TABLE_ENV = os.getenv("EXECKPI_FEATURE_TABLE", "").strip()
 CANDIDATE_TABLES = [
     FEATURE_TABLE_ENV if FEATURE_TABLE_ENV else None,
     f"{PROJECT_ID}.execkpi_execkpi.features_conversion",
-    f"{PROJECT_ID}.execkpi.features_conversion",
 ]
 
 
