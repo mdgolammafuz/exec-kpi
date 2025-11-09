@@ -19,7 +19,7 @@ app.add_middleware(
 )
 
 PROJECT = os.getenv("GCP_PROJECT", "exec-kpi")
-DATASET = os.getenv("BQ_DATASET", "execkpi_execkpi")
+DATASET = os.getenv("BQ_DATASET", "execkpi")
 SQL_DIR = Path(__file__).resolve().parent.parent / "sql"
 
 

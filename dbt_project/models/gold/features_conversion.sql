@@ -1,15 +1,10 @@
-{{ config(
-    materialized = 'view',
-    schema = 'execkpi'
-) }}
+{{ config(materialized='view', alias='features_conversion') }}
 
 -- Purpose: feature view (R/F/M + source mix) + 14-day conversion label
--- Source: thelook_ecommerce public dataset
--- Output: exec-kpi.execkpi.features_conversion
 
 with last_event as (
   select user_id, max(created_at) as anchor_ts
-  from `bigquery-public-data.thelook_ecommerce.events`
+  from {{ ref('events_silver') }}
   group by 1
 ),
 rfm as (
@@ -28,10 +23,10 @@ rfm as (
       when o.created_at >= timestamp_sub(le.anchor_ts, interval 30 day)
       then o.order_id
     end) as frequency_30d
-  from `bigquery-public-data.thelook_ecommerce.users` u
+  from {{ ref('users_silver') }} u
   join last_event le on le.user_id = u.id
-  left join `bigquery-public-data.thelook_ecommerce.orders` o on o.user_id = u.id
-  left join `bigquery-public-data.thelook_ecommerce.order_items` oi on oi.order_id = o.order_id
+  left join {{ ref('orders_silver') }} o on o.user_id = u.id
+  left join {{ ref('order_items_silver') }} oi on oi.order_id = o.order_id
   group by 1,2
 ),
 source_mix as (
@@ -42,7 +37,7 @@ source_mix as (
     safe_divide(countif(traffic_source = 'Organic'), count(*)) as pct_organic,
     safe_divide(countif(traffic_source = 'Ads'),     count(*)) as pct_ads,
     safe_divide(countif(traffic_source = 'Social'),  count(*)) as pct_social
-  from `bigquery-public-data.thelook_ecommerce.events`
+  from {{ ref('events_silver') }}
   group by 1
 ),
 label as (
@@ -53,7 +48,7 @@ label as (
       and o.created_at <= timestamp_add(le.anchor_ts, interval 14 day)
     ) > 0 as will_convert_14d
   from last_event le
-  left join `bigquery-public-data.thelook_ecommerce.orders` o
+  left join {{ ref('orders_silver') }} o
     on o.user_id = le.user_id
   group by 1
 )

@@ -7,4 +7,9 @@ model-paths: ["models"]
 models:
   execkpi_dbt:
     +materialized: view
-    +schema: execkpi   # BigQuery dataset name
+    +schema: execkpi     # BigQuery dataset name
+
+    silver:
+      +materialized: view
+    gold:
+      +materialized: view

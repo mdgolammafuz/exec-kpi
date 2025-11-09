@@ -15,3 +15,7 @@ shap==0.44.1
 # --- nice to have for dates etc. (comes with pandas deps anyway) ---
 python-dateutil==2.9.0.post0
 pytz==2025.2
+
+# --- dbt for BigQuery ---
+dbt-core==1.11.0b3
+dbt-bigquery==1.10.2
