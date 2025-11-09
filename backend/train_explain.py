@@ -25,6 +25,9 @@ ARTIFACT_DIR = Path(os.getenv("EXECKPI_ARTIFACT_DIR", "artifacts"))
 PROJECT_ID = os.getenv("GOOGLE_CLOUD_PROJECT", os.getenv("GCP_PROJECT", "exec-kpi"))
 FEATURE_TABLE_ENV = os.getenv("EXECKPI_FEATURE_TABLE", "").strip()
 
+# optional AWS bucket for artifact mirroring
+S3_BUCKET = os.getenv("EXECKPI_S3_BUCKET", "").strip()
+
 # dbt is creating exec-kpi:execkpi_execkpi.<model>
 CANDIDATE_TABLES = [
     FEATURE_TABLE_ENV if FEATURE_TABLE_ENV else None,
@@ -62,13 +65,10 @@ def _coerce_cell(v: Any) -> float:
     """
     if v is None:
         return 0.0
-    # list/array-like -> take first
     if isinstance(v, (list, tuple)):
         return _coerce_cell(v[0]) if v else 0.0
-    # plain number
     if isinstance(v, (int, float, np.integer, np.floating)):
         return float(v)
-    # stringy number, maybe wrapped in [] or with E
     if isinstance(v, str):
         s = v.strip()
         if s.startswith("[") and s.endswith("]"):
@@ -77,7 +77,6 @@ def _coerce_cell(v: Any) -> float:
             return float(s)
         except Exception:
             return 0.0
-    # fallback
     return 0.0
 
 
@@ -91,7 +90,6 @@ def load_features() -> pd.DataFrame:
     if df.empty:
         raise RuntimeError(f"Feature table {table_fq} returned 0 rows")
 
-    # columns we won't treat as features
     target_col = "will_convert_14d"
     id_cols = {"user_id"}
 
@@ -101,7 +99,6 @@ def load_features() -> pd.DataFrame:
     for col in feature_cols:
         df[col] = df[col].map(_coerce_cell).astype(float)
 
-    # stash for metrics / response
     df._feature_table_fq = table_fq  # type: ignore[attr-defined]
     return df
 
@@ -110,7 +107,6 @@ def load_features() -> pd.DataFrame:
 # Model candidates
 # ---------------------------------------------------------------------
 def get_model_candidates():
-    # xgboost is present in your venv now
     import xgboost as xgb
 
     models = [
@@ -155,19 +151,13 @@ def train_and_eval(model, X_train, X_test, y_train, y_test, supports_proba: bool
 # SHAP
 # ---------------------------------------------------------------------
 def maybe_compute_shap(best_name: str, best_model, X_train: pd.DataFrame, artifact_dir: Path):
-    """
-    Now that features are float64, shap.TreeExplainer should work.
-    We'll save a *ranked* list at artifacts/shap_importance.json
-    so the API can just serve it.
-    """
     try:
-      import shap  # type: ignore
+        import shap  # type: ignore
     except Exception:
-      print("[trainer][shap] shap not installed, skipping.")
-      return
+        print("[trainer][shap] shap not installed, skipping.")
+        return
 
     if best_name not in {"xgboost", "random_forest"}:
-        # still save nothing — it's fine
         return
 
     n = min(200, len(X_train))
@@ -180,7 +170,6 @@ def maybe_compute_shap(best_name: str, best_model, X_train: pd.DataFrame, artifa
         explainer = shap.TreeExplainer(best_model)
         shap_vals = explainer.shap_values(X_np)
 
-        # xgboost sometimes returns list[class]
         if isinstance(shap_vals, list):
             shap_vals = shap_vals[0]
 
@@ -207,7 +196,6 @@ def maybe_compute_shap(best_name: str, best_model, X_train: pd.DataFrame, artifa
             )
         print("[trainer][shap] saved to artifacts/shap_importance.json")
     except Exception as e:
-        # we *do* want to keep training success even if SHAP flops
         print(f"[trainer][shap] failed: {e}")
 
 
@@ -236,6 +224,23 @@ def save_artifacts(best_name, best_model, columns, all_metrics, artifact_dir: Pa
     }
 
 
+def maybe_upload_to_s3(artifact_dir: Path, bucket: str):
+    if not bucket:
+        return
+    try:
+        import boto3
+
+        s3 = boto3.client("s3")
+        files = ["model.pkl", "metrics.json", "shap_importance.json", "columns.json"]
+        for fname in files:
+            fpath = artifact_dir / fname
+            if fpath.exists():
+                s3.upload_file(str(fpath), bucket, fname)
+        print(f"[trainer] uploaded artifacts to s3://{bucket}/")
+    except Exception as e:
+        print(f"[trainer] S3 upload failed: {e}")
+
+
 # ---------------------------------------------------------------------
 # main()
 # ---------------------------------------------------------------------
@@ -250,7 +255,6 @@ def main():
     feature_table_fq = getattr(df, "_feature_table_fq", "UNKNOWN")
 
     X = df.drop(columns=[target_col, "user_id"], errors="ignore")
-    # at this point we already coerced to float in load_features()
     y = df[target_col].astype(int)
 
     print(f"[trainer] X shape: {X.shape}, dtypes: {list(set(X.dtypes))}")
@@ -298,6 +302,9 @@ def main():
 
     paths = save_artifacts(best_name, best_model, list(X.columns), all_metrics, ARTIFACT_DIR)
     maybe_compute_shap(best_name, best_model, X_train, ARTIFACT_DIR)
+
+    # NEW: optionally mirror to S3
+    maybe_upload_to_s3(ARTIFACT_DIR, S3_BUCKET)
 
     print("[trainer] training complete.")
     print(json.dumps({**all_metrics["_chosen"], **paths}, indent=2))

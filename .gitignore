@@ -37,6 +37,9 @@ infra/gcp/*.tfstate
 infra/gcp/*.tfstate.backup
 infra/gcp/.terraform/
 
+infra/aws/.terraform/
+infra/aws/*.tfstate
+infra/aws/*.tfstate.backup
 
 # OS/Editor
 .DS_Store

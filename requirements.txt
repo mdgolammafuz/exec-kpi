@@ -19,3 +19,6 @@ pytz==2025.2
 # --- dbt for BigQuery ---
 dbt-core==1.11.0b3
 dbt-bigquery==1.10.2
+
+# --- AWS S3 ---
+boto3
