@@ -162,6 +162,15 @@ We will capture them after deploying the Streamlit app and verifying numbers.
 
 ---
 
+## BI dashboard
+
+A sample Looker Studio dashboard built on the dbt gold views (`execkpi_execkpi`) is available here:
+
+[ExecKPI – Governed Analytics](https://lookerstudio.google.com/reporting/c0c4c083-3949-4f45-8735-69f3f0b67d9b)
+
+
+---
+
 ## Trade-offs and next steps
 
 **Trade-offs:** no infra-as-code or Cloud Run deployment here to avoid billing and key management in public. Streamlit UI is intentionally minimal. dbt tests are basic.
