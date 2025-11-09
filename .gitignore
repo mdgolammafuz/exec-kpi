@@ -8,7 +8,7 @@ env/
 # dbt artifacts
 dbt_project/target/
 dbt_project/logs/
-
+logs
 # Local dbt profiles (only if we ever put them in the repo)
 .dbt/
 
