@@ -32,6 +32,11 @@ airflow/*scheduler*.err
 airflow/standalone_admin_password.txt
 airflow/webserver_config.py
 
+# Terraform
+infra/gcp/*.tfstate
+infra/gcp/*.tfstate.backup
+infra/gcp/.terraform/
+
 
 # OS/Editor
 .DS_Store
