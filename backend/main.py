@@ -1,5 +1,6 @@
 import os
 import json
+import base64
 from pathlib import Path
 from typing import Any, List, Optional
 
@@ -7,6 +8,7 @@ import numpy as np
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from google.cloud import bigquery
+from google.oauth2 import service_account
 
 app = FastAPI(title="ExecKPI backend")
 
@@ -31,9 +33,22 @@ def _bq_client() -> bigquery.Client:
     """
     Return a BigQuery client for the configured project.
 
-    NOTE: on Render or any remote host you must provide credentials
-    (e.g. GOOGLE_APPLICATION_CREDENTIALS or workload identity).
+    If GOOGLE_APPLICATION_CREDENTIALS_JSON is present (base64-encoded),
+    decode it and build credentials from it. This is for Render.
+    Otherwise, fall back to default creds (local dev).
     """
+    b64_creds = os.getenv("GOOGLE_APPLICATION_CREDENTIALS_JSON")
+    if b64_creds:
+        try:
+            info = json.loads(base64.b64decode(b64_creds))
+            creds = service_account.Credentials.from_service_account_info(info)
+            return bigquery.Client(project=PROJECT, credentials=creds)
+        except Exception as e:
+            raise HTTPException(
+                status_code=500,
+                detail=f"BigQuery client init failed (bad service account): {e}",
+            )
+    # fallback: local machine with gcloud auth
     try:
         return bigquery.Client(project=PROJECT)
     except Exception as e:
