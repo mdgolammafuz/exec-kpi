@@ -1,6 +1,7 @@
-import os
-import json
 import base64
+import json
+import os
+from math import sqrt
 from pathlib import Path
 from typing import Any, List, Optional
 
@@ -9,6 +10,7 @@ from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from google.cloud import bigquery
 from google.oauth2 import service_account
+from scipy.stats import chi2, norm
 
 app = FastAPI(title="ExecKPI backend")
 
@@ -43,17 +45,20 @@ def _bq_client() -> bigquery.Client:
             info = json.loads(base64.b64decode(b64_creds))
             creds = service_account.Credentials.from_service_account_info(info)
             return bigquery.Client(project=PROJECT, credentials=creds)
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             raise HTTPException(
                 status_code=500,
                 detail=f"BigQuery client init failed (bad service account): {e}",
-            )
+            ) from e
     # fallback: local machine with gcloud auth
     try:
         return bigquery.Client(project=PROJECT)
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         # surface this as 500 to the caller
-        raise HTTPException(status_code=500, detail=f"BigQuery client init failed: {e}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"BigQuery client init failed: {e}",
+        ) from e
 
 
 def _to_native(obj: Any) -> Any:
@@ -102,24 +107,28 @@ def kpi_query(payload: dict):
 
     file_path = SQL_DIR / sql_file
     if not file_path.exists():
-        raise HTTPException(status_code=404, detail=f"SQL file {sql_file} not found")
+        raise HTTPException(
+            status_code=404,
+            detail=f"SQL file {sql_file} not found",
+        )
 
     sql = file_path.read_text(encoding="utf-8")
 
     # build query params for BQ
-    bq_params = []
-    for p in params:
-        bq_params.append(
-            bigquery.ScalarQueryParameter(p["name"], p["type"], p["value"])
-        )
+    bq_params = [
+        bigquery.ScalarQueryParameter(p["name"], p["type"], p["value"]) for p in params
+    ]
 
     job_config = bigquery.QueryJobConfig(query_parameters=bq_params)
 
     client = _bq_client()
     try:
         df = client.query(sql, job_config=job_config).result().to_dataframe()
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"BigQuery query failed: {e}")
+    except Exception as e:  # noqa: BLE001
+        raise HTTPException(
+            status_code=500,
+            detail=f"BigQuery query failed: {e}",
+        ) from e
 
     return {
         "rows": len(df),
@@ -142,17 +151,17 @@ def ab_sample():
 
 @app.post("/ab/test")
 def ab_test(payload: dict):
-    from math import sqrt
-    from scipy.stats import norm, chi2
-
     try:
         a_s = int(payload["a_success"])
         a_n = int(payload["a_total"])
         b_s = int(payload["b_success"])
         b_n = int(payload["b_total"])
         alpha = float(payload.get("alpha", 0.05))
-    except Exception as e:
-        raise HTTPException(status_code=400, detail=f"bad payload: {e}")
+    except Exception as e:  # noqa: BLE001
+        raise HTTPException(
+            status_code=400,
+            detail=f"bad payload: {e}",
+        ) from e
 
     if a_n <= 0 or b_n <= 0:
         raise HTTPException(status_code=400, detail="group sizes must be > 0")

@@ -8,7 +8,7 @@ import json
 import os
 import pickle
 from pathlib import Path
-from typing import Optional, Any
+from typing import Any, Optional
 
 import numpy as np
 import pandas as pd
@@ -27,10 +27,8 @@ ARTIFACT_DIR = Path(os.getenv("EXECKPI_ARTIFACT_DIR", "artifacts"))
 PROJECT_ID = os.getenv("GOOGLE_CLOUD_PROJECT", os.getenv("GCP_PROJECT", "exec-kpi"))
 FEATURE_TABLE_ENV = os.getenv("EXECKPI_FEATURE_TABLE", "").strip()
 
-# optional AWS bucket for artifact mirroring
 S3_BUCKET = os.getenv("EXECKPI_S3_BUCKET", "").strip()
 
-# dbt is creating exec-kpi:execkpi_execkpi.<model>
 CANDIDATE_TABLES = [
     FEATURE_TABLE_ENV if FEATURE_TABLE_ENV else None,
     f"{PROJECT_ID}.execkpi_execkpi.features_conversion",
@@ -41,16 +39,11 @@ CANDIDATE_TABLES = [
 # BQ helpers
 # ---------------------------------------------------------------------
 def _bq_client() -> bigquery.Client:
-    """
-    Build a BigQuery client that also works in Render, where we pass
-    the service account as base64 in GOOGLE_APPLICATION_CREDENTIALS_JSON.
-    """
     b64_creds = os.getenv("GOOGLE_APPLICATION_CREDENTIALS_JSON")
     if b64_creds:
         info = json.loads(base64.b64decode(b64_creds))
         creds = service_account.Credentials.from_service_account_info(info)
         return bigquery.Client(project=PROJECT_ID, credentials=creds)
-    # local/dev fallback
     return bigquery.Client(project=PROJECT_ID)
 
 
@@ -75,10 +68,6 @@ def find_existing_features_table(client: bigquery.Client) -> str:
 
 
 def _coerce_cell(v: Any) -> float:
-    """
-    BigQuery sometimes gives us weird stringy numbers like '[6.874376E-1]'.
-    This tries to make *everything* a float.
-    """
     if v is None:
         return 0.0
     if isinstance(v, (list, tuple)):
@@ -127,7 +116,11 @@ def get_model_candidates():
 
     models = [
         ("logistic_regression", LogisticRegression(max_iter=1000), True),
-        ("random_forest", RandomForestClassifier(n_estimators=200, random_state=42), True),
+        (
+            "random_forest",
+            RandomForestClassifier(n_estimators=200, random_state=42),
+            True,
+        ),
         (
             "xgboost",
             xgb.XGBClassifier(
@@ -166,7 +159,9 @@ def train_and_eval(model, X_train, X_test, y_train, y_test, supports_proba: bool
 # ---------------------------------------------------------------------
 # SHAP
 # ---------------------------------------------------------------------
-def maybe_compute_shap(best_name: str, best_model, X_train: pd.DataFrame, artifact_dir: Path):
+def maybe_compute_shap(
+    best_name: str, best_model, X_train: pd.DataFrame, artifact_dir: Path
+):
     try:
         import shap  # type: ignore
     except Exception:
@@ -179,7 +174,7 @@ def maybe_compute_shap(best_name: str, best_model, X_train: pd.DataFrame, artifa
     n = min(200, len(X_train))
     sample = X_train.sample(n=n, random_state=42)
     X_np = sample.to_numpy(dtype=float, copy=True)
-    print(f"[trainer][shap] computing feature importance...")
+    print("[trainer][shap] computing feature importance...")
     print(f"[trainer][shap] X_np shape: {X_np.shape}, dtype: {X_np.dtype}")
 
     try:
@@ -194,7 +189,7 @@ def maybe_compute_shap(best_name: str, best_model, X_train: pd.DataFrame, artifa
 
         feats = [
             {"feature": f, "mean_abs_shap": float(m)}
-            for f, m in zip(feature_names, mean_abs)
+            for f, m in zip(feature_names, mean_abs, strict=False)
         ]
         feats.sort(key=lambda x: x["mean_abs_shap"], reverse=True)
 
@@ -288,7 +283,9 @@ def main():
 
     for name, model, supports_proba in candidates:
         print(f"[trainer] training {name} ...")
-        auc, acc = train_and_eval(model, X_train, X_test, y_train, y_test, supports_proba)
+        auc, acc = train_and_eval(
+            model, X_train, X_test, y_train, y_test, supports_proba
+        )
         all_metrics[name] = {
             "auc": auc,
             "accuracy": acc,
@@ -316,10 +313,10 @@ def main():
         "feature_table": feature_table_fq,
     }
 
-    paths = save_artifacts(best_name, best_model, list(X.columns), all_metrics, ARTIFACT_DIR)
+    paths = save_artifacts(
+        best_name, best_model, list(X.columns), all_metrics, ARTIFACT_DIR
+    )
     maybe_compute_shap(best_name, best_model, X_train, ARTIFACT_DIR)
-
-    # NEW: optionally mirror to S3
     maybe_upload_to_s3(ARTIFACT_DIR, S3_BUCKET)
 
     print("[trainer] training complete.")
