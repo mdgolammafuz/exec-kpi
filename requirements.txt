@@ -22,3 +22,8 @@ dbt-bigquery==1.10.2
 
 # --- AWS S3 ---
 boto3
+
+# --- tests ---
+pytest
+black
+ruff

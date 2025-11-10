@@ -294,8 +294,9 @@ function ABPanel ( {
   const [ loading, setLoading ] = useState<boolean>( true );
   const [ testing, setTesting ] = useState<boolean>( false );
   const [ panelError, setPanelError ] = useState<string | null>( null );
+  const [ lastResult, setLastResult ] = useState<ABTestResult | null>( null );
 
-  // load once on mount
+  // load once on mount – DO NOT depend on setOutput here or it will refetch forever
   useEffect( () =>
   {
     const fetchSample = async () =>
@@ -317,8 +318,7 @@ function ABPanel ( {
       }
     };
     void fetchSample();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [] );
+  }, [] ); // 👈 run once
 
   const runTest = () =>
   {
@@ -330,8 +330,6 @@ function ABPanel ( {
     setPanelError( null );
     setError( null );
     setTesting( true );
-
-    // show in result area that we’re running a new test
     setOutput( { status: "running-ab-test", alpha } );
 
     runABTest( {
@@ -344,6 +342,7 @@ function ABPanel ( {
       .then( ( data ) =>
       {
         setOutput( data );
+        setLastResult( data );
       } )
       .catch( ( err: unknown ) =>
       {
@@ -354,94 +353,110 @@ function ABPanel ( {
       .finally( () => setTesting( false ) );
   };
 
-  const retryFetch = () =>
-  {
-    setLoading( true );
-    setPanelError( null );
-    getABSample()
-      .then( ( data ) =>
-      {
-        setSample( data.sample );
-        setOutput( data );
-      } )
-      .catch( ( err: unknown ) =>
-      {
-        const msg = err instanceof Error ? err.message : "Request failed";
-        setPanelError( msg );
-      } )
-      .finally( () => setLoading( false ) );
-  };
-
   return (
     <div>
-      <h2 style={ { fontSize: "1.05rem", marginBottom: "1rem" } }>A/B</h2>
+      <h2>A/B</h2>
       { loading ? (
-        <p style={ { color: "#6b7280" } }>Loading A/B sample…</p>
+        <p style={ { color: "#777" } }>Loading A/B sample…</p>
       ) : panelError ? (
         <div>
-          <p style={ { color: "crimson", marginBottom: "0.5rem" } }>
-            Couldn’t load sample.
-          </p>
-          <button
-            onClick={ retryFetch }
-            style={ {
-              background: "#1f2937",
-              color: "#fff",
-              border: "none",
-              padding: "0.45rem 0.9rem",
-              borderRadius: "0.35rem",
-              cursor: "pointer",
-            } }
-          >
-            Retry
-          </button>
+          <p style={ { color: "crimson" } }>Couldn’t load sample.</p>
         </div>
       ) : sample ? (
         <>
-          <p style={ { marginBottom: "0.6rem" } }>
+          <p>
             A: { sample.A.success }/{ sample.A.total } | B: { sample.B.success }/
             { sample.B.total }
           </p>
-          <div
-            style={ { display: "flex", alignItems: "center", gap: "0.5rem" } }
+          <label>
+            alpha:
+            <input
+              type="number"
+              step="0.01"
+              min="0.01"
+              max="0.2"
+              value={ alpha }
+              onChange={ ( e ) => setAlpha( parseFloat( e.target.value ) ) }
+            />
+          </label>
+          <button
+            onClick={ runTest }
+            style={ { marginLeft: "0.5rem" } }
+            disabled={ testing }
           >
-            <label style={ { fontSize: "0.8rem", color: "#374151" } }>
-              alpha
-              <input
-                type="number"
-                step="0.01"
-                min="0.01"
-                max="0.2"
-                value={ alpha }
-                onChange={ ( e ) => setAlpha( parseFloat( e.target.value ) ) }
-                style={ {
-                  marginLeft: "0.5rem",
-                  padding: "0.25rem 0.35rem",
-                  width: "5rem",
-                  border: "1px solid #d1d5db",
-                  borderRadius: "0.4rem",
-                } }
-              />
-            </label>
-            <button
-              onClick={ runTest }
-              style={ {
-                background: testing ? "#94a3b8" : "#1f2937",
-                color: "#fff",
-                border: "none",
-                padding: "0.45rem 0.9rem",
-                borderRadius: "0.35rem",
-                cursor: testing ? "not-allowed" : "pointer",
-              } }
-              disabled={ testing }
-            >
-              { testing ? "Running…" : "Run test" }
-            </button>
-          </div>
+            { testing ? "Running…" : "Run test" }
+          </button>
           { testing ? (
-            <p style={ { color: "#6b7280", marginTop: "0.3rem" } }>
+            <p style={ { color: "#777", marginTop: "0.25rem" } }>
               Testing with α = { alpha } …
             </p>
+          ) : null }
+
+          { lastResult ? (
+            <div
+              style={ {
+                marginTop: "1rem",
+                padding: "1rem",
+                background: "#fff",
+                border: "1px solid #ddd",
+                borderRadius: "0.5rem",
+                display: "flex",
+                gap: "1rem",
+                flexWrap: "wrap",
+              } }
+            >
+              <div>
+                <div style={ { fontSize: "0.75rem", color: "#555" } }>
+                  SRM p-value
+                </div>
+                <div style={ { fontSize: "1.1rem", fontWeight: 600 } }>
+                  { lastResult.srm_p !== undefined
+                    ? lastResult.srm_p.toFixed( 3 )
+                    : "—" }
+                </div>
+                <div style={ { fontSize: "0.7rem", color: "#777" } }>
+                  &gt; 0.05 → allocation OK
+                </div>
+              </div>
+              <div>
+                <div style={ { fontSize: "0.75rem", color: "#555" } }>
+                  p-value (2-prop z)
+                </div>
+                <div style={ { fontSize: "1.1rem", fontWeight: 600 } }>
+                  { lastResult.p_value.toFixed( 3 ) }
+                </div>
+                <div style={ { fontSize: "0.7rem", color: "#777" } }>
+                  &lt; { alpha } → significant
+                </div>
+              </div>
+              <div>
+                <div style={ { fontSize: "0.75rem", color: "#555" } }>
+                  95% CI (uplift)
+                </div>
+                <div style={ { fontSize: "1.1rem", fontWeight: 600 } }>
+                  { lastResult.ci_95
+                    ? `[${ ( lastResult.ci_95[ 0 ] * 100 ).toFixed( 2 ) }%, ${ ( lastResult.ci_95[ 1 ] * 100 ).toFixed( 2 ) }%]`
+                    : "—" }
+                </div>
+              </div>
+              <div>
+                <div style={ { fontSize: "0.75rem", color: "#555" } }>
+                  Significant?
+                </div>
+                <div
+                  style={ {
+                    padding: "0.1rem 0.6rem",
+                    borderRadius: "9999px",
+                    background: lastResult.significant ? "#ecfdf3" : "#fef2f2",
+                    color: lastResult.significant ? "#166534" : "#b91c1c",
+                    display: "inline-block",
+                    fontWeight: 600,
+                  } }
+                >
+                  { lastResult.significant ? "YES" : "NO" }
+                </div>
+              </div>
+            </div>
           ) : null }
         </>
       ) : (
@@ -450,6 +465,7 @@ function ABPanel ( {
     </div>
   );
 }
+
 
 // small helper to avoid `any` for axios-like errors
 function isAxiosLike404 ( err: unknown ): boolean

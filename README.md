@@ -1,6 +1,7 @@
 # ExecKPI — Product KPIs with BigQuery, dbt, and Streamlit
 
-[![CI](https://github.com/mdgolammafuz/exec-kpi/actions/workflows/ci.yml/badge.svg)](https://github.com/mdgolammafuz/exec-kpi/actions/workflows/ci.yml)
+[![backend-ci](https://github.com/mdgolammafuz/exec-kpi/actions/workflows/backend-ci.yml/badge.svg)](https://github.com/mdgolammafuz/exec-kpi/actions/workflows/backend-ci.yml)
+
 
 ## What this repository provides
 
