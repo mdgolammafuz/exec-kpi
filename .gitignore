@@ -16,6 +16,7 @@ logs
 *.json
 *.boto
 .env
+!execkpi-ui/package.json
 
 # Airflow local state (do NOT commit)
 airflow/airflow.db
