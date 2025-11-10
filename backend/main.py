@@ -10,21 +10,35 @@ from google.cloud import bigquery
 
 app = FastAPI(title="ExecKPI backend")
 
+# CORS: keep relaxed because Vercel/localhost will call this
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # relax for local dev
+    allow_origins=["*"],  # relax for local + Vercel
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
+# --------------------------------------------------------------------------
+# Config / paths
+# --------------------------------------------------------------------------
 PROJECT = os.getenv("GCP_PROJECT", "exec-kpi")
-DATASET = os.getenv("BQ_DATASET", "execkpi_execkpi")
+DATASET = os.getenv("BQ_DATASET", "execkpi_execkpi")  # dbt dataset name
 SQL_DIR = Path(__file__).resolve().parent.parent / "sql"
 
 
 def _bq_client() -> bigquery.Client:
-    return bigquery.Client(project=PROJECT)
+    """
+    Return a BigQuery client for the configured project.
+
+    NOTE: on Render or any remote host you must provide credentials
+    (e.g. GOOGLE_APPLICATION_CREDENTIALS or workload identity).
+    """
+    try:
+        return bigquery.Client(project=PROJECT)
+    except Exception as e:
+        # surface this as 500 to the caller
+        raise HTTPException(status_code=500, detail=f"BigQuery client init failed: {e}")
 
 
 def _to_native(obj: Any) -> Any:
@@ -42,10 +56,27 @@ def _to_native(obj: Any) -> Any:
     return obj
 
 
-# ------------------------------------------------------------------------------
-# KPI / SQL runner
-# ------------------------------------------------------------------------------
+# --------------------------------------------------------------------------
+# Health / info
+# --------------------------------------------------------------------------
+@app.get("/")
+def root() -> dict:
+    return {
+        "ok": True,
+        "service": "exec-kpi-backend",
+        "project": PROJECT,
+        "dataset": DATASET,
+    }
 
+
+@app.get("/healthz")
+def healthz() -> dict:
+    return {"status": "ok"}
+
+
+# --------------------------------------------------------------------------
+# KPI / SQL runner
+# --------------------------------------------------------------------------
 @app.post("/kpi/query")
 def kpi_query(payload: dict):
     sql_file = payload.get("sql_file")
@@ -60,6 +91,7 @@ def kpi_query(payload: dict):
 
     sql = file_path.read_text(encoding="utf-8")
 
+    # build query params for BQ
     bq_params = []
     for p in params:
         bq_params.append(
@@ -67,7 +99,12 @@ def kpi_query(payload: dict):
         )
 
     job_config = bigquery.QueryJobConfig(query_parameters=bq_params)
-    df = _bq_client().query(sql, job_config=job_config).result().to_dataframe()
+
+    client = _bq_client()
+    try:
+        df = client.query(sql, job_config=job_config).result().to_dataframe()
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"BigQuery query failed: {e}")
 
     return {
         "rows": len(df),
@@ -76,10 +113,9 @@ def kpi_query(payload: dict):
     }
 
 
-# ------------------------------------------------------------------------------
+# --------------------------------------------------------------------------
 # A/B endpoints
-# ------------------------------------------------------------------------------
-
+# --------------------------------------------------------------------------
 @app.get("/ab/sample")
 def ab_sample():
     sample = {
@@ -110,6 +146,7 @@ def ab_test(payload: dict):
     p_b = b_s / b_n
     uplift = p_b - p_a
 
+    # SRM check (sample ratio mismatch)
     total = a_n + b_n
     exp = total / 2
     chi2_stat = ((a_n - exp) ** 2) / exp + ((b_n - exp) ** 2) / exp
@@ -137,10 +174,9 @@ def ab_test(payload: dict):
     return _to_native(resp)
 
 
-# ------------------------------------------------------------------------------
+# --------------------------------------------------------------------------
 # ML endpoints
-# ------------------------------------------------------------------------------
-
+# --------------------------------------------------------------------------
 def _extract_last_json(stdout: str) -> Optional[dict]:
     idx = stdout.rfind("{")
     if idx == -1:
@@ -177,9 +213,7 @@ def ml_train():
     if parsed is not None:
         return _to_native(parsed)
 
-    return {
-        "output": out.splitlines()
-    }
+    return {"output": out.splitlines()}
 
 
 @app.get("/ml/latest")
