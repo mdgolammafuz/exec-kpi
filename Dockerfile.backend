@@ -14,7 +14,6 @@ RUN pip install --no-cache-dir -r /app/requirements.txt
 COPY backend /app/backend
 COPY sql /app/sql
 COPY artifacts /app/artifacts
-COPY data /app/data
 
 # 5) env defaults (can be overridden in Cloud Run)
 ENV GCP_PROJECT=exec-kpi
