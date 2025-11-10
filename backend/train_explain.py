@@ -3,6 +3,7 @@ ExecKPI trainer: load BQ features, train 3 models, pick best, save artifacts,
 and compute SHAP feature importance (now that columns are coerced).
 """
 
+import base64
 import json
 import os
 import pickle
@@ -13,6 +14,7 @@ import numpy as np
 import pandas as pd
 from google.api_core.exceptions import NotFound
 from google.cloud import bigquery
+from google.oauth2 import service_account
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import accuracy_score, roc_auc_score
@@ -38,6 +40,20 @@ CANDIDATE_TABLES = [
 # ---------------------------------------------------------------------
 # BQ helpers
 # ---------------------------------------------------------------------
+def _bq_client() -> bigquery.Client:
+    """
+    Build a BigQuery client that also works in Render, where we pass
+    the service account as base64 in GOOGLE_APPLICATION_CREDENTIALS_JSON.
+    """
+    b64_creds = os.getenv("GOOGLE_APPLICATION_CREDENTIALS_JSON")
+    if b64_creds:
+        info = json.loads(base64.b64decode(b64_creds))
+        creds = service_account.Credentials.from_service_account_info(info)
+        return bigquery.Client(project=PROJECT_ID, credentials=creds)
+    # local/dev fallback
+    return bigquery.Client(project=PROJECT_ID)
+
+
 def find_existing_features_table(client: bigquery.Client) -> str:
     print("[trainer] probing candidate feature tables in BigQuery...")
     for table_fq in CANDIDATE_TABLES:
@@ -81,7 +97,7 @@ def _coerce_cell(v: Any) -> float:
 
 
 def load_features() -> pd.DataFrame:
-    client = bigquery.Client(project=PROJECT_ID)
+    client = _bq_client()
     table_fq = find_existing_features_table(client)
     print(f"[trainer] loading from {table_fq}...")
     df = client.query(f"SELECT * FROM `{table_fq}`").result().to_dataframe()
