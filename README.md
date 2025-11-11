@@ -11,18 +11,18 @@ ExecKPI is an analytics application that connects:
 - Google BigQuery as the warehouse.
 
 It supports KPI queries, A/B testing stats (SRM p-value, 2-prop z p-value, 95% CI), and an ML train step that pulls data from BigQuery and writes artifacts.  
-**Dataset used:** `exec-kpi.execkpi_execkpi` (project: `exec-kpi`, dataset: `execkpi_execkpi`).
+**Dataset used:** KPI views are in `exec-kpi.execkpi_execkpi` (project: `exec-kpi`, dataset: `execkpi_execkpi`). These views are derived from Google's public ecommerce dataset `bigquery-public-data.thelook_ecommerce` (staged into our own dataset and then reshaped into revenue, funnel, A/B, and retention views).
 
 ---
 
 ## 2. Live endpoints
 
 
-**Backend (Render):**
- API (FastAPI/Swagger): https://execkpi-backend-latest.onrender.com/docs
- Raw root/health: https://execkpi-backend-latest.onrender.com/
-**UI (Vercel):** https://execkpi-ui-vercel.vercel.app/  
-**UI repo (Vercel host):** https://github.com/mdgolammafuz/execkpi-ui-vercel.git
+- **Backend (Render):**
+    - API (FastAPI/Swagger): https://execkpi-backend-latest.onrender.com/docs
+    - Raw root/health: https://execkpi-backend-latest.onrender.com/
+- **UI (Vercel):** https://execkpi-ui-vercel.vercel.app/  
+- **UI repo (Vercel host):** https://github.com/mdgolammafuz/execkpi-ui-vercel.git
 
 We keep a working copy of the UI inside this main repo (`execkpi-ui/`), and we also keep a separate UI repo for Vercel so deployments stay clean and fast.
 
@@ -108,7 +108,7 @@ Local can authenticate to BigQuery via:
   - `BQ_DATASET=execkpi_execkpi`
   - `GOOGLE_APPLICATION_CREDENTIALS_JSON=<base64-service-account>`
   - optional: `EXECKPI_S3_BUCKET=<bucket>` to mirror artifacts to S3
-- public URL: https://execkpi-backend-latest.onrender.com
+- public URL: https://execkpi-backend-latest.onrender.com/docs
 
 **Vercel (UI)**
 
