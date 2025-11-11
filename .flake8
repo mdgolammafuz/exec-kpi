@@ -1,6 +1,0 @@
-[flake8]
-max-line-length = 120
-extend-ignore = E203, W503
-exclude = .git,__pycache__,.venv,.mypy_cache,.pytest_cache,.cache,airflow,dbt_project/target,dbt_project/.dbt
-per-file-ignores =
-    app/app.py: E501

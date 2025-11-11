@@ -1,5 +1,4 @@
--- Purpose: quick sanity counts you can paste into README
-
+-- Purpose: quick sanity counts
 -- Last 7 days KPIs
 SELECT *
 FROM `exec-kpi.execkpi.vw_revenue_daily`
