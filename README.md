@@ -240,3 +240,49 @@ Runs on push:
 1. `ruff check backend`
 2. `black --check backend`
 3. `pytest`
+
+---
+
+## 11. Data Protection / GDPR Notes
+
+- This project uses analytical data derived from Google BigQuery public sample data (`bigquery-public-data.thelook_ecommerce`) and reshapes it into reporting views in `exec-kpi.execkpi_execkpi`. No real customer PII is expected in this setup.
+- The repository does **not** contain production secrets or credentials. Service account credentials are passed to the backend at runtime via environment variables (e.g. `GOOGLE_APPLICATION_CREDENTIALS_JSON`) on the hosting platform.
+- If this project is connected to non-public or customer data, the data controller is responsible for:
+  - providing a lawful basis for processing,
+  - ensuring data minimisation in the warehouse views,
+  - configuring access control on the GCP project and BigQuery datasets,
+  - and rotating / protecting service account keys.
+- Application logs in the current setup are technical (requests, errors) and should not include personal data. If personal data is later added to the pipelines, log redaction and retention policies must be aligned with the organisation’s GDPR policy.
+- Frontend ↔ backend traffic is over HTTPS (Vercel → Render), but when deploying to another environment, TLS must be enforced to avoid transmitting identifiers in cleartext.
+
+---
+
+## 12. License
+
+This project is licensed under the **MIT License**.
+
+```text
+MIT License
+
+Copyright (c) 2025
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+```
+
+---
