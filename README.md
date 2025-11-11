@@ -1,179 +1,242 @@
-# ExecKPI — Product KPIs with BigQuery, dbt, and Streamlit
+# ExecKPI
+[![backend-ci](https://github.com/mdgolammafuz/exec-kpi/actions/workflows/backend-ci.yml/badge.svg)](https://github.com/mdgolammafuz/exec-kpi/actions/workflows/backend-ci.yml)
+---
 
+## 1. Overview
+
+ExecKPI is an analytics application that connects:
+
+- a React/Vite UI (Vercel),
+- a FastAPI backend (Render, Docker),
+- Google BigQuery as the warehouse.
+
+It supports KPI queries, A/B testing stats (SRM p-value, 2-prop z p-value, 95% CI), and an ML train step that pulls data from BigQuery and writes artifacts.  
+**Dataset used:** `exec-kpi.execkpi_execkpi` (project: `exec-kpi`, dataset: `execkpi_execkpi`).
+
+---
+
+## 2. Live endpoints
+
+
+**Backend (Render):**
+ API (FastAPI/Swagger): https://execkpi-backend-latest.onrender.com/docs
+ Raw root/health: https://execkpi-backend-latest.onrender.com/
+**UI (Vercel):** https://execkpi-ui-vercel.vercel.app/  
+**UI repo (Vercel host):** https://github.com/mdgolammafuz/execkpi-ui-vercel.git
+
+We keep a working copy of the UI inside this main repo (`execkpi-ui/`), and we also keep a separate UI repo for Vercel so deployments stay clean and fast.
+
+---
+
+## 3. Architecture
+
+```mermaid
+flowchart TD
+    subgraph UI["Vercel UI (React/Vite)"]
+        A[KPI tab]
+        B[AB tab]
+        C[ML tab]
+    end
+
+    subgraph BE["Render FastAPI (Docker)"]
+        BE1[/POST /kpi/query/]
+        BE2[/GET /ab/sample/]
+        BE3[/POST /ab/test/]
+        BE4[/POST /ml/train/]
+        BE5[/GET /ml/latest/]
+        BE6[/GET /ml/shap/]
+        SQ[(sql/*.sql)]
+        ART[(artifacts/*.json)]
+    end
+
+    %% line break in the dataset label
+    subgraph BQ["BigQuery\nexec-kpi.execkpi_execkpi"]
+        T1[revenue_daily]
+        T2[funnel_users]
+        T3[ab_metrics]
+        T4[retention_weekly]
+    end
+
+    subgraph CRED["Render env vars"]
+        ENV1[GOOGLE_APPLICATION_CREDENTIALS_JSON]
+        ENV2[GCP_PROJECT]
+        ENV3[BQ_DATASET]
+    end
+
+    subgraph OPT["Optional AWS S3"]
+        S3[(S3 bucket)]
+    end
+
+    UI -->|HTTP| BE
+    BE1 -->|read| SQ
+    BE1 -->|query| BQ
+    BE4 -->|load data| BQ
+    BE4 -->|write| ART
+    BE5 -->|read| ART
+    BE6 -->|read| ART
+    BE4 -->|optional upload| S3
+    CRED --> BE
+```
+
+**Data flow**
+
+1. UI → `POST /kpi/query` → backend reads `sql/api_*.sql` → BigQuery (`exec-kpi.execkpi_execkpi`) → returns JSON.
+2. UI → `GET /ab/sample` / `POST /ab/test` → backend computes SRM p-value, p-value, 95% CI → returns JSON.
+3. UI → `POST /ml/train` → backend runs `backend/train_explain.py` → BigQuery → writes to `artifacts/` → UI can call `/ml/latest` and `/ml/shap`.
+
+---
+
+## 4. Environments and configuration
+
+**Local**
+
+```bash
+pip install -r requirements.txt
+uvicorn backend.main:app --reload --port 8001
+```
+
+Local can authenticate to BigQuery via:
+
+- `gcloud auth application-default login`, **or**
+- `export GOOGLE_APPLICATION_CREDENTIALS_JSON=<base64-service-account-json>`
+
+**Render (backend)**
+
+- built from `Dockerfile.backend`
+- environment:
+  - `GCP_PROJECT=exec-kpi`
+  - `BQ_DATASET=execkpi_execkpi`
+  - `GOOGLE_APPLICATION_CREDENTIALS_JSON=<base64-service-account>`
+  - optional: `EXECKPI_S3_BUCKET=<bucket>` to mirror artifacts to S3
+- public URL: https://execkpi-backend-latest.onrender.com
+
+**Vercel (UI)**
+
+- repo: https://github.com/mdgolammafuz/execkpi-ui-vercel.git
+- env:
+  - `VITE_API_BASE=https://execkpi-backend-latest.onrender.com`
+
+---
+
+## 5. Commands
+
+**Run backend (local)**
+
+```bash
+uvicorn backend.main:app --reload --port 8001
+```
+
+**One-command Docker run (example)**
+
+```bash
+docker run -p 8080:8080   -e GCP_PROJECT=exec-kpi   -e BQ_DATASET=execkpi_execkpi   -e GOOGLE_APPLICATION_CREDENTIALS_JSON='<base64-service-account>'   mdgolammafuz/execkpi-backend:latest
+```
+
+Then visit: `http://127.0.0.1:8080/docs`
+
+**Local CI (same steps as GitHub Actions)**
+
+```bash
+ruff check backend
+black --check backend
+pytest
+```
+
+**Trigger ML train (live backend)**
+
+```bash
+curl -X POST https://execkpi-backend-latest.onrender.com/ml/train
+```
+
+---
+
+## 6. API → asset mapping
+
+- `POST /kpi/query` → uses SQL in `sql/api_*.sql`
+- `GET /ab/sample` → returns demo sample from backend
+- `POST /ab/test` → Python computation: SRM p-value, 2-prop z p-value, 95% CI, significance flag
+- `POST /ml/train` → runs `backend/train_explain.py`
+- `GET /ml/latest` → reads `artifacts/metrics.json`
+- `GET /ml/shap` → reads `artifacts/shap_summary.json` (404 if not present)
+
+Dataset behind these KPI queries is: **BigQuery dataset `execkpi_execkpi` in project `exec-kpi`.**
+
+---
+
+## 7. Folder structure
+
+**Main repo (`exec-kpi`)**
+
+```text
+.
+├── Dockerfile.backend
+├── README.md
+├── airflow/               # local airflow / orchestration
+├── artifacts/             # ML outputs written by trainer
+├── backend/               # FastAPI + trainer
+│   ├── __init__.py
+│   ├── main.py
+│   └── train_explain.py
+├── dbt_project/           # dbt models, target, logs
+├── docs/
+├── execkpi-ui/            # UI copy kept in the main repo
+├── infra/                 # aws/ and gcp/ (terraform / k8s / helm stubs)
+├── logs/
+├── pyproject.toml         # ruff/black/pytest config
+├── pytest.ini
+├── requirements.txt
+├── sql/                   # KPI SQLs and supporting views
+└── tests/                 # pytest tests (health, config, imports)
+```
+
+**UI folder (copy inside repo: `execkpi-ui/`)**
+
+```text
+execkpi-ui/
+├── README.md
+├── index.html
+├── public/
+├── src/
+│   ├── App.tsx
+│   ├── api.ts
+│   ├── index.css
+│   └── main.tsx
+├── package.json
+├── package-lock.json
+└── vite.config.ts
+```
+
+**Separate UI repo for Vercel**
+
+- https://github.com/mdgolammafuz/execkpi-ui-vercel.git
+- mirrors the above UI but without the rest of the monorepo, so Vercel builds stay small and focused.
+
+---
+
+## 8. AWS S3 / GCP / infra
+
+- The trainer supports an optional `EXECKPI_S3_BUCKET` environment variable. When present, artifacts written to `artifacts/` can also be mirrored to S3. This shows integration with AWS storage.
+- The `infra/aws` and `infra/gcp` folders are present to show that the same service can be provisioned through cloud/terraform or k8s/helm style configs.
+- BigQuery access is done through an environment-supplied, base64-encoded service account JSON, decoded at runtime. This keeps secrets out of the image and still lets the container run on Render.
+
+---
+
+## 9. Trade-offs and considerations
+
+- **Stateful ML step:** artifacts are written to container storage; this is intentional to show a stateful component. For long-running deployments they should be pushed to S3/GCS.
+- **Open CORS:** allowed so that the Vercel UI and local browsers can call the Render backend directly. In production this can be tightened to specific origins.
+- **SQL in repo:** keeping KPI SQL under `sql/` makes the pipeline reviewable and keeps business logic under version control.
+- **Two UI locations:** keeping a copy in the main repo proves end-to-end integration; keeping a separate repo for Vercel keeps deployments clean.
+
+---
+
+## 10. CI
+
+GitHub Actions:  
 [![backend-ci](https://github.com/mdgolammafuz/exec-kpi/actions/workflows/backend-ci.yml/badge.svg)](https://github.com/mdgolammafuz/exec-kpi/actions/workflows/backend-ci.yml)
 
+Runs on push:
 
-## What this repository provides
-
-We ship a focused analytics stack that answers three product questions:
-
-- **Revenue trend** over time and change vs. a comparable window  
-- **A/B test conversion** with p‑value, confidence interval, and split‑health (SRM)  
-- **Weekly retention** as a cohort × week heatmap
-
-Warehouse: **BigQuery**. Transformation/tests: **dbt**. UI: **Streamlit**.  
-CI runs linting and basic dbt checks.
-
-## Live demo
-
-> **Link:** _to be added after Streamlit Community Cloud deploy_
-
----
-
-## How to run locally
-
-```bash
-# 0) Clone
-git clone https://github.com/mdgolammafuz/exec-kpi.git
-cd exec-kpi
-
-# 1) Python env
-python -m venv .venv
-source .venv/bin/activate
-pip install -r requirements.txt
-
-# 2) GCP auth + project
-gcloud auth application-default login
-gcloud config set project exec-kpi
-
-# 3) Build analytics layer
-cd dbt_project
-dbt run
-dbt test
-cd ..
-
-# 4) Start the app
-python -m streamlit run app/app.py
-# Open http://localhost:8501
-```
-
----
-
-## Folder structure
-
-```
-.
-├─ app/
-│  └─ app.py                # Streamlit UI: revenue chart, A/B significance (z-test + SRM), retention heatmap
-├─ dbt_project/
-│  ├─ models/kpi/
-│  │  ├─ revenue_daily.sql          # Daily revenue aggregation (source → daily metric)
-│  │  ├─ funnel_users.sql           # Per-user funnel flags (visited, added_to_cart, converted)
-│  │  ├─ ab_group.sql               # A/B group assignment (A/B split)
-│  │  ├─ ab_metrics.sql             # Users, converters, conversion_rate per group
-│  │  └─ retention_weekly.sql       # Cohort week × week_n retention rates
-│  └─ tests/                        # Basic dbt schema/data tests (not_null, accepted_values)
-├─ airflow/
-│  └─ dags/execkpi_daily.py         # (Optional) Daily job: dbt run + BQML retrain
-├─ .github/workflows/ci.yml         # Lint + dbt parse/tests (CI badge at top of README)
-├─ requirements.txt                 # App + dbt + BigQuery client deps
-└─ docs/images/                     # Repo-hosted screenshots used in README
-```
-
-> Notes  
-> • We keep only the source layout in the tree; runtime artifacts (dbt `target/`, logs, `__pycache__`, local Airflow SQLite DB) are not part of this view.  
-> • `sql/` files (if present) mirror dbt logic and BQML examples for reference; the Streamlit app reads the **dbt** models in `dbt_project/models/kpi/`.
-
----
-
-## CLI sanity checks
-
-Set once per shell:
-```bash
-export PROJECT=exec-kpi
-export DATASET=execkpi_execkpi
-export START=2025-09-14
-export END=2025-10-14
-```
-
-**Revenue: current vs previous same-length window**
-```bash
-bq query --use_legacy_sql=false "
-DECLARE d_start DATE DEFAULT DATE('$START');
-DECLARE d_end   DATE DEFAULT DATE('$END');
-DECLARE win_days INT64 DEFAULT DATE_DIFF(d_end,d_start,DAY)+1;
-WITH cur AS (
-  SELECT SUM(revenue) cur_rev
-  FROM \`$PROJECT.$DATASET.revenue_daily\`
-  WHERE day BETWEEN d_start AND d_end
-),
-prev AS (
-  SELECT SUM(revenue) prev_rev
-  FROM \`$PROJECT.$DATASET.revenue_daily\`
-  WHERE day BETWEEN DATE_SUB(d_start,INTERVAL win_days DAY)
-                  AND DATE_SUB(d_end,INTERVAL win_days DAY)
-)
-SELECT cur_rev, prev_rev, cur_rev - prev_rev AS delta,
-SAFE_DIVIDE(cur_rev - prev_rev, prev_rev)*100 AS delta_pct
-FROM cur, prev;"
-```
-
-**A/B group counts**
-```bash
-bq query --use_legacy_sql=false "
-SELECT
-  SUM(CASE WHEN ab_group='A' THEN users END)      AS n_c,
-  SUM(CASE WHEN ab_group='B' THEN users END)      AS n_t,
-  SUM(CASE WHEN ab_group='A' THEN converters END) AS x_c,
-  SUM(CASE WHEN ab_group='B' THEN converters END) AS x_t
-FROM \`$PROJECT.$DATASET.ab_metrics\`;"
-```
-
-**Retention coverage**
-```bash
-bq query --use_legacy_sql=false "
-SELECT
-  COUNT(*) AS row_count,
-  MIN(week_n) AS min_week,
-  MAX(week_n) AS max_week,
-  MIN(retention_rate) AS min_ret,
-  MAX(retention_rate) AS max_ret
-FROM \`$PROJECT.$DATASET.retention_weekly\`;"
-```
-
----
-
-## dbt model intent (short)
-
-- `revenue_daily.sql` — daily revenue series  
-- `funnel_users.sql` — one row per user with funnel flags  
-- `ab_group.sql` — A/B assignment  
-- `ab_metrics.sql` — users, converters, conversion rate by group  
-- `retention_weekly.sql` — cohort_week × week_n retention
-
----
-
-## CI
-
-- `flake8` lint for the Streamlit app and basic Python checks  
-- dbt parse and schema tests  
-- Status is visible in the badge at the top of this file
-
----
-
-## Screenshots (to add)
-
-Place PNGs under `docs/images/` and reference them here:
-
-- Revenue trend: `docs/images/01_revenue.png`  
-- A/B conversion and significance: `docs/images/02_ab.png`  
-- Retention heatmap: `docs/images/03_retention.png`
-
-We will capture them after deploying the Streamlit app and verifying numbers.
-
----
-
-## BI dashboard
-
-A sample Looker Studio dashboard built on the dbt gold views (`execkpi_execkpi`) is available here:
-
-[ExecKPI – Governed Analytics](https://lookerstudio.google.com/reporting/c0c4c083-3949-4f45-8735-69f3f0b67d9b)
-
-
----
-
-## Trade-offs and next steps
-
-**Trade-offs:** no infra-as-code or Cloud Run deployment here to avoid billing and key management in public. Streamlit UI is intentionally minimal. dbt tests are basic.
-
-**Next steps:** host on Streamlit Community Cloud (with Secrets), optionally add Looker tiles, add Terraform for BigQuery resources, and add lightweight logging of query timings to a table.
+1. `ruff check backend`
+2. `black --check backend`
+3. `pytest`
