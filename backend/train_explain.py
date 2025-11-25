@@ -2,6 +2,7 @@
 ExecKPI trainer: load BQ features, train 3 models, pick best, save artifacts,
 and compute SHAP feature importance (now that columns are coerced).
 """
+# backend/train_explain.py
 
 import base64
 import json
