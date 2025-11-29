@@ -1,18 +1,26 @@
 # ExecKPI
 [![backend-ci](https://github.com/mdgolammafuz/exec-kpi/actions/workflows/backend-ci.yml/badge.svg)](https://github.com/mdgolammafuz/exec-kpi/actions/workflows/backend-ci.yml)
 
-**A production-grade analytics platform demonstrating end-to-end data engineering: dbt transformations, FastAPI services, ML training, and statistical A/B testing.**
+**An analytics platform demonstrating end-to-end data engineering: dbt transformations, FastAPI services, ML training, and statistical A/B testing.**
 
 ---
 
 ## Overview
 
-ExecKPI is a full-stack analytics application connecting:
+ExecKPI is a full-stack analytics platform that enforces data quality and statistical rigor before model training.
 
-- **Frontend:** React/Vite UI (Vercel)
-- **Backend:** FastAPI + Docker (Render)
-- **Data warehouse:** Google BigQuery
-- **Orchestration:** dbt for transformations, Airflow-ready architecture
+### Tech Stack
+* **Orchestration & Governance:**
+    * **Apache Airflow:** Orchestrates the daily pipeline and enforces "Quality Gates" (stopping the pipeline if data tests fail).
+    * **dbt:** Handles data transformations (Bronze $\to$ Silver $\to$ Gold) and schema validation.
+* **Data:**
+    * **Google BigQuery:** Cloud data warehouse.
+    * **Source:** Google's public `thelook_ecommerce` dataset.
+* **DevOps & Serving:**
+    * **Docker:** Containerized backend execution.
+    * **GitHub Actions:** CI pipeline for code quality (Ruff/Black/Pytest).
+    * **Render:** Production backend hosting.
+    * **Vercel:** Frontend distribution.
 
 **Core capabilities:**
 - KPI dashboards (revenue, funnel conversion, retention cohorts)
@@ -409,6 +417,35 @@ exec-kpi/
 
 **`GET /ml/latest`**
 - Returns best model metrics (AUC, accuracy, feature count)
+
+---
+
+## Data Governance & Orchestration
+
+ExecKPI enforces strict data quality gates using **Apache Airflow**. The pipeline ensures that no ML model is trained on "dirty" data.
+
+**The DAG Workflow (`execkpi_daily`):**
+1.  **`dbt_run`**: Transforms raw data (Bronze) → Silver → Gold analytical models.
+2.  **`dbt_test_gold`**: Runs data quality checks (schema validation, null checks, referential integrity). **If this fails, the pipeline stops.**
+3.  **`train_local_model`**: Only if tests pass, the ML pipeline triggers to retrain the XGBoost model on the validated Gold data.
+
+**Verification (Local Run):**
+```bash
+# 1. Initialize Airflow DB (sqlite)
+export AIRFLOW_HOME=$(pwd)/airflow
+airflow db migrate
+
+# 2. Trigger the full DAG manually
+airflow dags test execkpi_daily 2024-01-01
+```
+
+**Governance (Quality Gates)**: The pipeline verifies data integrity (11 tests passed) before proceeding.
+
+![Airflow Governance](docs/images/airflow_dbt_verify.png)
+
+**ML Automation**: Once validated, the model trains on the Gold data and achieves high accuracy (AUC=0.97).
+
+![Airflow ML Automation](docs/images/airflow_ml_verify.png)
 
 ---
 
