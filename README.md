@@ -85,42 +85,61 @@ ExecKPI is a full-stack analytics platform that enforces data quality and statis
 
 ## Architecture
 
+<!-- mermaid diagram -->
+
 ```mermaid
 flowchart TD
-    subgraph UI["Vercel UI (React/Vite)"]
+    subgraph Orchestration ["Orchestration (Airflow)"]
+        DAG[Daily DAG]
+    end
+
+    subgraph UI ["Vercel UI (React/Vite)"]
         A[KPI Dashboard]
         B[A/B Testing]
         C[ML Training]
     end
 
-    subgraph BE["Render FastAPI (Docker)"]
+    subgraph BE ["Render FastAPI (Docker)"]
         BE1[/POST /kpi/query/]
         BE2[/POST /ab/test/]
         BE3[/POST /ml/train/]
         BE4[/GET /ml/latest/]
         SQ[(sql/*.sql)]
-        ART[(artifacts/*.json)]
+        ART_LOC[(Local Artifacts)]
     end
 
-    subgraph BQ["BigQuery: exec-kpi.execkpi_execkpi"]
+    subgraph GCP ["GCP (Data Warehouse)"]
+        BQ[BigQuery: exec-kpi.execkpi_execkpi]
         T1[revenue_daily]
         T2[funnel_users]
-        T3[ab_group + ab_metrics]
-        T4[retention_weekly]
-        T5[features_conversion]
+        T3[ab_metrics]
     end
 
-    subgraph DBT["dbt Transformations"]
-        D1[silver models]
-        D2[gold models]
+    subgraph AWS ["AWS (Model Registry)"]
+        S3[(S3 Bucket)]
     end
 
+    subgraph DBT ["Transformation (dbt)"]
+        D1[Silver Models]
+        D2[Gold Models]
+    end
+
+    %% Data Governance / Scheduling
+    DAG -->|Trigger| DBT
+    DAG -->|Trigger| BE3
+
+    %% User Interaction
     UI -->|HTTP| BE
-    BE1 -->|read| SQ
-    BE1 -->|query| BQ
-    BE3 -->|load data| BQ
-    BE3 -->|write| ART
-    DBT -->|build| BQ
+    BE1 -->|Read| SQ
+    BE1 -->|Query| BQ
+    
+    %% ML Pipeline
+    BE3 -->|Train on| BQ
+    BE3 -->|Write| ART_LOC
+    BE3 -.->|Backup/Registry| S3
+    
+    %% Data Engineering
+    DBT -->|Build| BQ
 ```
 
 **Data flow:**
@@ -129,6 +148,44 @@ flowchart TD
 3. **React UI** displays results with charts and tables
 4. **ML pipeline** trains on BigQuery data → writes artifacts locally (Render container)
 
+**Data Flow Diagram**:
+
+<!-- mermaid diagram -->
+
+```mermaid
+flowchart LR
+    %% Step 1: Transformation
+    subgraph Ingestion ["1. ETL & Transformation (dbt)"]
+        Raw[("Raw Data<br/>(thelook_ecommerce)")] --> dbt(("dbt Core"))
+        dbt --> Silver[("Silver<br/>(Staging)")]
+        Silver --> Gold[("Gold<br/>(Analytical Views)")]
+    end
+
+    %% Step 2 & 3: Serving & Consumption
+    subgraph Serving ["2. Serving (FastAPI)"]
+        direction TB
+        SQL["SQL Templates"] -.-> API["FastAPI Backend"]
+        API <-->|Query & Fetch| Gold
+    end
+
+    subgraph Consumption ["3. UI (React)"]
+        User(("User")) -->|View| Dashboard["Charts & Tables"]
+        Dashboard <-->|JSON| API
+    end
+
+    %% Step 4: ML Pipeline
+    subgraph ML ["4. ML Pipeline"]
+        Trainer["XGBoost Trainer"]
+        Artifacts["Model Artifacts<br/>(JSON/Pickle)"]
+        
+        Gold -->|Fetch Features| Trainer
+        Trainer -->|Save| Artifacts
+    end
+
+    %% Styling
+    style Gold fill:#f9f,stroke:#333,stroke-width:2px
+    style API fill:#bbf,stroke:#333,stroke-width:2px
+```
 ---
 
 ## A/B Testing Framework
@@ -449,6 +506,87 @@ airflow dags test execkpi_daily 2024-01-01
 
 ---
 
+## Cloud Infrastructure (Terraform)
+
+This project uses a **multi-cloud infrastructure** orchestrated via **Terraform**, demonstrating vendor-agnostic design and reproducible IaC workflows.
+
+## Architecture Decision
+
+- **GCP (Data Layer):**  
+  BigQuery is used as the primary Data Warehouse, powered by the `thelook_ecommerce` dataset and enriched by dbt transformations.
+
+- **AWS (Artifact Layer):**  
+  S3 stores long-term ML artifacts (JSON, Pickle, Metrics), fully decoupled from compute environments and deployable across platforms.
+
+- **Render (Compute Layer):**  
+  Stateless Docker containers (API + Trainer) run on Render, consuming storage from both clouds.
+
+## Directory Layout
+
+Infrastructure modules are split by cloud provider to maintain independent deployment lifecycles.
+
+```text
+infra/
+├── aws/                 # AWS S3 + IAM User for Artifacts
+│   ├── main.tf
+│   ├── variables.tf
+│   └── outputs.tf
+└── gcp/                 # GCP BigQuery + Service Account
+    ├── main.tf
+    ├── variables.tf
+    └── outputs.tf
+```
+
+## Provisioning Resources
+
+### 1. AWS – Artifact Storage (S3 + IAM)
+
+Creates:
+
+- S3 bucket for ML model artifacts  
+- IAM user `execkpi-user` with **read/write only** to that bucket (no admin privileges)
+
+```bash
+cd infra/aws
+terraform init
+terraform apply
+```
+
+---
+
+### 2. GCP – Data Warehouse (BigQuery)
+
+Creates:
+
+- `execkpi` BigQuery dataset  
+- Service Account `execkpi-sa` with **BigQuery Admin** privileges for dbt, ingestion, and ML workflows
+
+```bash
+cd infra/gcp
+terraform init
+terraform apply
+```
+
+## Security Notes
+
+### Principle of Least Privilege
+
+- No root or owner credentials are used.
+- The application operates solely through the IAM User (AWS) and Service Account (GCP) generated by Terraform.
+- Access is tightly restricted to only the required resources (S3 bucket, BigQuery dataset).
+
+### Secret Management
+
+- Credentials produced by Terraform are **not committed to Git**.
+- Instead, they are injected at runtime (Render Dashboard → Environment Variables):
+
+  - `GOOGLE_APPLICATION_CREDENTIALS_JSON`
+  - `AWS_ACCESS_KEY_ID`
+  - `AWS_SECRET_ACCESS_KEY`
+
+- This ensures secure, isolated, environment-specific configuration without leaking secrets.
+
+---
 ## Technology Stack
 
 **Backend:**
